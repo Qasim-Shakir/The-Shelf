@@ -26,6 +26,20 @@ This contains everything you need to run your app locally.
 3. Run the app:
    `npm run dev`
 
+## Admin User Setup
+By default, new users are created with the `reader` role. To create an admin user, update the `role` field for a user document in MongoDB to `admin`.
+
+If you are using MongoDB Atlas, you can do this from the Atlas UI or via the MongoDB shell:
+
+```js
+db.users.updateOne(
+  { email: "admin@example.com" },
+  { $set: { role: "admin" } }
+)
+```
+
+Once a user has `role: "admin"`, they can access protected admin routes such as book ingestion and management.
+
 ## Technology Stack & Architecture
 
 ### Overview
