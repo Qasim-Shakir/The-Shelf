@@ -3,6 +3,7 @@ import axios from "axios";
 
 // --- 1. Define Interfaces ---
 interface User {
+  fullName: string;
   id: string;
   username: string;
   email: string;

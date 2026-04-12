@@ -7,6 +7,10 @@ import axios from "axios";
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import fs from "fs";
+import { createWriteStream } from "fs";
+import { pipeline } from "stream/promises";
+import multer from "multer";
 
 declare global {
   namespace Express {
@@ -20,6 +24,48 @@ dotenv.config({ path: ".env.local" });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// ✅ Storage configuration
+const STORAGE_DIR = path.join(__dirname, "storage");
+const EPUB_DIR = path.join(STORAGE_DIR, "epub");
+const COVERS_DIR = path.join(STORAGE_DIR, "covers");
+
+// Ensure directories exist
+[EPUB_DIR, COVERS_DIR].forEach(dir => {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+});
+
+// ✅ Multer storage configuration
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, EPUB_DIR);
+  },
+  filename: (req, file, cb) => {
+    const timestamp = Date.now();
+    const sanitized = file.originalname.replace(/[^\w\s.-]/g, "").slice(0, 50);
+    cb(null, `${timestamp}-${sanitized}`);
+  }
+});
+
+const upload = multer({
+  storage,
+  fileFilter: (req, file, cb) => {
+    // Accept both epub and cover image files
+    const epubAllowed = file.fieldname === "epub_file" && 
+                       (file.mimetype === "application/epub+zip" || file.originalname.endsWith(".epub"));
+    const coverAllowed = file.fieldname === "cover_image" && 
+                        file.mimetype.startsWith("image/");
+    
+    if (epubAllowed || coverAllowed) {
+      cb(null, true);
+    } else {
+      cb(new Error("Invalid file type or field name"));
+    }
+  },
+  limits: { fileSize: 500 * 1024 * 1024 } // 500MB limit
+});
 
 // ✅ Added explicit DB name "the-shelf" in URI
 const MONGODB_URI =
@@ -50,7 +96,7 @@ const bookSchema = new mongoose.Schema({
   coverUrl: { type: String },
   description: { type: String, default: "" },
   language: { type: String, default: "en" },
-  gutenbergId: { type: Number, unique: true },
+  gutenbergId: { type: Number, unique: true, sparse: true },
   ingestedAt: { type: Date, default: Date.now },
 });
 
@@ -67,6 +113,13 @@ const progressSchema = new mongoose.Schema({
 const User = mongoose.model("User", userSchema);
 const Book = mongoose.model("Book", bookSchema);
 const ReadingProgress = mongoose.model("ReadingProgress", progressSchema);
+
+// ✅ Sync indexes to apply schema changes (sparse option for gutenbergId)
+Book.syncIndexes().then(() => {
+  console.log("[Index] Synced Book indexes with sparse option");
+}).catch((err) => {
+  console.warn("[Index] Error syncing indexes:", err.message);
+});
 
 // ---------------------------------------------------------------------------
 // Middleware
@@ -108,6 +161,19 @@ async function startServer() {
       socketTimeoutMS: 45000,
     });
     console.log("Connected to MongoDB");
+
+    // ✅ Fix E11000 error: drop old gutenbergId index to recreate with sparse option
+    try {
+      await Book.collection.dropIndex("gutenbergId_1");
+      console.log("[Index] Dropped old gutenbergId index");
+    } catch (err: any) {
+      if (err.code !== 27) { // 27 = index not found (expected)
+        console.warn("[Index] Error dropping index:", err.message);
+      }
+    }
+
+    // Let Mongoose automatically recreate indexes with the new schema
+    console.log("[Index] Mongoose will recreate indexes with sparse option");
   } catch (err) {
     console.error("MongoDB connection error:", err);
     process.exit(1);
@@ -343,6 +409,134 @@ async function startServer() {
     } catch (error: any) {
       console.error("Scrape error:", error);
       res.status(500).json({ error: "Failed to scrape Gutenberg." });
+    }
+  });
+
+  // ✅ NEW: Upload EPUB file endpoint
+  app.post("/api/admin/books/upload", verifyToken, isAdmin, upload.fields([
+    { name: "epub_file", maxCount: 1 },
+    { name: "cover_image", maxCount: 1 }
+  ]), async (req, res) => {
+    try {
+      const files = req.files as { [key: string]: Express.Multer.File[] } | undefined;
+      const epubFiles = files?.epub_file;
+
+      if (!epubFiles || epubFiles.length === 0) {
+        return res.status(400).json({ error: "EPUB file is required" });
+      }
+
+      const { title, author, description = "", genre = "Uploaded", language = "en", gutenberg_id } = req.body;
+
+      if (!title || !author) {
+        // Clean up uploaded files if metadata is missing
+        epubFiles.forEach(f => fs.unlinkSync(f.path));
+        files?.cover_image?.forEach(f => fs.unlinkSync(f.path));
+        return res.status(400).json({ error: "Title and author are required" });
+      }
+
+      const epubFile = epubFiles[0];
+      const coverFile = files?.cover_image?.[0];
+      const epubRelativePath = `/api/books/epub-upload/${epubFile.filename}`;
+
+      let coverUrl = "";
+      // If a cover image was uploaded, save it next to the EPUB
+      if (coverFile) {
+        const coverPath = path.join(COVERS_DIR, coverFile.filename);
+        try {
+          fs.renameSync(coverFile.path, coverPath);
+          coverUrl = `/api/books/cover-upload/${coverFile.filename}`;
+        } catch (err) {
+          console.warn("Failed to move cover image:", err);
+          // Continue without cover if it fails
+        }
+      }
+
+      const bookData: any = {
+        title,
+        author,
+        category: genre,
+        epubUrl: epubRelativePath,
+        coverUrl,
+        description,
+        language,
+      };
+
+      // Add gutenberg_id if provided
+      if (gutenberg_id && gutenberg_id.trim()) {
+        bookData.gutenbergId = parseInt(gutenberg_id, 10);
+      }
+
+      const book = new Book(bookData);
+      await book.save();
+
+      res.json({
+        message: "Book uploaded successfully",
+        book: {
+          id: book._id,
+          title: book.title,
+          author: book.author,
+          epubUrl: book.epubUrl,
+        }
+      });
+    } catch (error: any) {
+      // Clean up files on error
+      const files = req.files as { [key: string]: Express.Multer.File[] } | undefined;
+      files?.epub_file?.forEach(f => {
+        try { fs.unlinkSync(f.path); } catch (e) { /* ignore */ }
+      });
+      files?.cover_image?.forEach(f => {
+        try { fs.unlinkSync(f.path); } catch (e) { /* ignore */ }
+      });
+
+      console.error("Upload error:", error);
+      res.status(500).json({ error: error.message || "Failed to upload book" });
+    }
+  });
+
+  // ✅ NEW: Serve uploaded EPUB files
+  app.get("/api/books/epub-upload/:filename", (req, res) => {
+    try {
+      const { filename } = req.params;
+      const filePath = path.join(EPUB_DIR, filename);
+
+      // Security: prevent directory traversal
+      if (!filePath.startsWith(EPUB_DIR)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ error: "File not found" });
+      }
+
+      res.setHeader("Content-Type", "application/epub+zip");
+      res.setHeader("Accept-Ranges", "bytes");
+      res.sendFile(filePath);
+    } catch (error: any) {
+      console.error("EPUB upload serve error:", error);
+      res.status(500).json({ error: "Failed to serve EPUB" });
+    }
+  });
+
+  // ✅ NEW: Serve uploaded cover images
+  app.get("/api/books/cover-upload/:filename", (req, res) => {
+    try {
+      const { filename } = req.params;
+      const filePath = path.join(COVERS_DIR, filename);
+
+      // Security: prevent directory traversal
+      if (!filePath.startsWith(COVERS_DIR)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ error: "File not found" });
+      }
+
+      res.setHeader("Content-Type", "image/jpeg");
+      res.sendFile(filePath);
+    } catch (error: any) {
+      console.error("Cover upload serve error:", error);
+      res.status(500).json({ error: "Failed to serve cover" });
     }
   });
 

@@ -44,9 +44,8 @@ export default function Reader() {
         const bookData = bookRes.data;
         setBookMeta(bookData);
 
-        // 2. Load EPUB
-        // epubUrl from MongoDB is a Gutenberg URL — load it directly.
-        // If your backend has a /stream endpoint that proxies it, use that instead.
+        // 2. Load EPUB from server endpoint
+        // epubUrl is now a local server path (e.g., /api/books/epub/123)
         const epubSource = bookData.epubUrl;
         if (!epubSource) {
           setError("No EPUB URL found for this book.");
