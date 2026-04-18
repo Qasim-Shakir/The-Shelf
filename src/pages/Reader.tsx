@@ -1,159 +1,360 @@
-import React, { useEffect, useRef, useState } from "react";
+// Reader.tsx
+
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import ePub, { Rendition, Book } from "epubjs";
-import { ChevronLeft, Maximize, Minimize, ChevronRight, List, BookOpen } from "lucide-react";
+import { ChevronLeft, Maximize, Minimize, ChevronRight, List, BookOpen, Moon, Sun } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import axios from "axios";
 
+const PAGE_FLIP_STYLE = `
+  @keyframes flipRight {
+    0%   { opacity: 0; transform: perspective(800px) rotateY(-25deg) scaleX(0.92); }
+    40%  { opacity: 0.18; }
+    100% { opacity: 0; transform: perspective(800px) rotateY(0deg) scaleX(1); }
+  }
+  @keyframes flipLeft {
+    0%   { opacity: 0; transform: perspective(800px) rotateY(25deg) scaleX(0.92); }
+    40%  { opacity: 0.18; }
+    100% { opacity: 0; transform: perspective(800px) rotateY(0deg) scaleX(1); }
+  }
+  .flip-overlay-right {
+    animation: flipRight 0.32s ease-out forwards;
+    background: linear-gradient(to left, rgba(0,0,0,0.06) 0%, transparent 60%);
+    pointer-events: none;
+  }
+  .flip-overlay-left {
+    animation: flipLeft 0.32s ease-out forwards;
+    background: linear-gradient(to right, rgba(0,0,0,0.06) 0%, transparent 60%);
+    pointer-events: none;
+  }
+`;
+
+// ── Theme tokens ──────────────────────────────────────────────────────────────
+const LIGHT_THEME = {
+  pageBg:        "#F5F0E8",   // Warm Linen
+  cardBg:        "#FDFAF5",   // Parchment
+  heading:       "#3B2F1E",   // Dark Walnut
+  body:          "#7C6147",   // Tan Oak
+  border:        "#C5B9A8",   // Dust
+  accent:        "#C8A96E",   // Aged Gold
+  readerBg:      "#FDFAF5",   // Parchment
+  readerText:    "#2C1810",
+  readerIframe:  "transparent",
+};
+
+const DARK_THEME = {
+  pageBg:        "#1C1A17",
+  cardBg:        "#242019",
+  heading:       "#E8DCC8",
+  body:          "#A89880",
+  border:        "#3A3528",
+  accent:        "#C8A96E",
+  readerBg:      "#242019",
+  readerText:    "#DDD0B8",
+  readerIframe:  "#242019",
+};
+
 export default function Reader() {
-  const { id }           = useParams();
-  const [searchParams]   = useSearchParams();
-  const navigate         = useNavigate();
-  const { user }         = useAuth();
+  const { id }         = useParams();
+  const [searchParams] = useSearchParams();
+  const navigate       = useNavigate();
+  const { user }       = useAuth();
 
-  const viewerRef        = useRef<HTMLDivElement>(null);
-  const bookRef          = useRef<Book | null>(null);
-  const renditionRef     = useRef<Rendition | null>(null);
-  const saveTimerRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const viewerRef      = useRef<HTMLDivElement>(null);
+  const bookRef        = useRef<Book | null>(null);
+  const renditionRef   = useRef<Rendition | null>(null);
+  const flipTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const currentCfiRef  = useRef<string | null>(null);
+  const initialDisplayDoneRef = useRef(false);
 
-  const [bookMeta,      setBookMeta]      = useState<any>(null);
-  const [progress,      setProgress]      = useState(0);
-  const [chapter,       setChapter]       = useState("");
-  const [totalPages,    setTotalPages]    = useState(0);
-  const [currentPage,   setCurrentPage]   = useState(0);
-  const [toc,           setToc]           = useState<any[]>([]);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [fontSize,      setFontSize]      = useState(18);
-  const [isFullscreen,  setIsFullscreen]  = useState(false);
-  const [error,         setError]         = useState("");
-  const [phase,         setPhase]         = useState<"cover" | "loading" | "reading">("cover");
-  const [savedCfi,      setSavedCfi]      = useState<string | null>(null);
+  const [bookMeta,        setBookMeta]        = useState<any>(null);
+  const [isLoading,       setIsLoading]       = useState(true);
+  const [progress,        setProgress]        = useState(0);
+  const [chapter,         setChapter]         = useState("");
+  const [totalPages,      setTotalPages]      = useState(0);
+  const [currentPage,     setCurrentPage]     = useState(0);
+  const [toc,             setToc]             = useState<any[]>([]);
+  const [isSidebarOpen,   setIsSidebarOpen]   = useState(false);
+  const [fontSize,        setFontSize]        = useState(18);
+  const [isFullscreen,    setIsFullscreen]    = useState(false);
+  const [layout,          setLayout]          = useState<"spread" | "single">("spread");
+  const [flipDir,         setFlipDir]         = useState<"" | "right" | "left">("");
+  const [error,           setError]           = useState("");
+  const [isDark,          setIsDark]          = useState(false);
+  
+  const [pageInputValue,  setPageInputValue]  = useState("");
+  const [isEditingPage,   setIsEditingPage]   = useState(false);
+  const pageInputRef      = useRef<HTMLInputElement>(null);
 
-  const token = localStorage.getItem("token");
+  const token  = localStorage.getItem("token");
+  const colors = isDark ? DARK_THEME : LIGHT_THEME;
 
-  // Check browser compatibility
+  // ── THE BULLETPROOF SYNC REF ──
+  // This guarantees our event listener always has the absolute latest ID and Token
+  const syncRef = useRef({ id, token });
   useEffect(() => {
-    if (typeof window === "undefined" || !window.CSS) {
-      setError("Your browser does not support EPUB reading. Please use a modern browser.");
+    syncRef.current = { id, token };
+  }, [id, token]);
+
+  useEffect(() => {
+    if (document.getElementById("shelf-flip-style")) return;
+    const style       = document.createElement("style");
+    style.id          = "shelf-flip-style";
+    style.textContent = PAGE_FLIP_STYLE;
+    document.head.appendChild(style);
+  }, []);
+
+  // ── Save progress ─────────────────────────────────────────────────────────
+// ── Save progress ─────────────────────────────────────────────────────────
+  const saveProgress = useCallback(async (cfi: string, pct: number, currentChapter: string) => {
+    const { id: activeId, token: activeToken } = syncRef.current;
+    if (!activeToken || activeToken === "null" || !activeId) return;
+
+    try {
+      console.log("📡 Attempting to save to DB:", { cfi, pct: Math.round(pct), chapter: currentChapter });
+      
+      // FIX: Changed to POST and moved bookId into the body payload
+      const response = await axios.post(
+        `/api/progress`,
+        { 
+          bookId: activeId,  // <--- Hamdan's backend requires this here!
+          last_location: cfi, 
+          percentage: Math.round(pct), 
+          chapter: currentChapter || "Unknown Chapter" 
+        },
+        { headers: { Authorization: `Bearer ${activeToken}` } }
+      );
+      
+      if (response.data.success) {
+        console.log("✅ Progress saved successfully");
+      }
+    } catch (err) {
+      console.error("❌ Database Save Error:", err);
     }
   }, []);
 
-  // Step 1: fetch book metadata + saved progress, show cover page
+  // ── Mount a rendition ────────────────────────────────────────────────────
+  const mountRendition = useCallback((
+    book:            Book,
+    container:       HTMLDivElement,
+    spreadMode:      "spread" | "single",
+    resumeCfi:       string | null,
+    currentFontSize: number,
+    dark:            boolean,
+  ) => {
+    if (renditionRef.current) {
+      try { renditionRef.current.destroy(); } catch { /* ignore */ }
+      renditionRef.current = null;
+    }
+
+    initialDisplayDoneRef.current = false;
+    const c = dark ? DARK_THEME : LIGHT_THEME;
+
+    const rendition = book.renderTo(container, {
+      width:                "100%",
+      height:               "100%",
+      flow:                 "paginated",
+      spread:               spreadMode === "spread" ? "always" : "none",
+      minSpreadWidth:       spreadMode === "spread" ? 600 : 9999,
+      manager:              "default",
+      allowScriptedContent: true,
+    });
+    renditionRef.current = rendition;
+
+    const injectStyle = (selector: string, rules: Record<string, string>) =>
+      (rendition.themes as any).override(selector, rules);
+
+    injectStyle("body", {
+      "color":       c.readerText,
+      "background":  c.readerBg,
+      "font-family": "Georgia, 'Times New Roman', serif",
+      "font-size":   `${currentFontSize}px`,
+      "line-height": "1.85",
+      "padding":     spreadMode === "spread" ? "2rem 2.5rem" : "2rem 4rem",
+      "max-width":   "100%",
+      "box-sizing":  "border-box",
+    });
+    injectStyle("p", { "margin": "0 0 1.2em 0", "text-align": "justify", "text-indent": "1.5em", "hyphens": "auto" });
+    injectStyle("h1, h2, h3", { "font-family": "Georgia, serif", "text-align": "center", "margin-bottom": "1.5em", "color": dark ? "#C8A96E" : "#2C1810" });
+    injectStyle("img", { "max-width": "100%", "height": "auto", "display": "block", "margin": "1rem auto" });
+
+    rendition.themes.fontSize(`${currentFontSize}px`);
+
+    rendition.on("relocated", (location: any) => {
+      const cfi = location.start.cfi;
+      currentCfiRef.current = cfi;
+
+      const pct     = (book.locations.percentageFromCfi(cfi) ?? 0) * 100;
+      const loc     = book.locations.locationFromCfi(cfi);
+      const pageNum = typeof loc === "number" ? loc : 0;
+      
+      // Extract the new chapter directly so we don't rely on stale React state
+      const navItem = book.navigation?.get(cfi);
+      const newChapter = navItem?.label || "";
+
+      setProgress(pct);
+      setCurrentPage(pageNum);
+      setChapter(newChapter);
+      setIsLoading(false);
+
+      console.log(`📖 Flipped to page ${pageNum}`);
+
+      if (!initialDisplayDoneRef.current) {
+        console.log("🚧 Skipping save for initial load.");
+        initialDisplayDoneRef.current = true;
+        return; 
+      }
+
+      saveProgress(cfi, pct, newChapter);
+    });
+
+    rendition.display(resumeCfi ?? undefined);
+    return rendition;
+  }, [saveProgress]);
+
+  // ── Initial load ─────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!id || !user) return;
-    const fetchMeta = async () => {
+    if (!id || !user || !viewerRef.current) return;
+
+    let epubBook: Book | null = null;
+
+    const initReader = async () => {
       try {
         const bookRes = await axios.get(`/api/books/${id}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         setBookMeta(bookRes.data);
 
+        if (!bookRes.data.epubUrl) {
+          setError("No EPUB file found for this book.");
+          setIsLoading(false);
+          return;
+        }
+
+        const epubRes = await axios.get(`/api/books/epub-proxy/${id}`, {
+          responseType: "arraybuffer",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        epubBook        = ePub(epubRes.data);
+        bookRef.current = epubBook;
+
+        epubBook.loaded.navigation.then((nav: any) => setToc(nav.toc ?? []));
+
+        await epubBook.ready;
+        await epubBook.locations.generate(1600);
+        setTotalPages(epubBook.locations.length());
+
+        let savedCfi: string | null = null;
         try {
-          const progressRes = await axios.get(`/api/progress/${id}`, {
+          const pRes = await axios.get(`/api/progress/${id}`, {
             headers: { Authorization: `Bearer ${token}` },
           });
-          if (progressRes.data?.last_location) {
-            setSavedCfi(progressRes.data.last_location);
-          }
-        } catch {
-          // no saved progress, that's fine
-        }
+          if (pRes.data?.last_location) savedCfi = pRes.data.last_location;
+        } catch { /* no saved progress */ }
+
+        const reset = searchParams.get("reset") === "true";
+        currentCfiRef.current = savedCfi && !reset ? savedCfi : null;
+
+        mountRendition(epubBook, viewerRef.current!, layout, currentCfiRef.current, fontSize, isDark);
+
       } catch (err: any) {
-        setError("Book is currently unavailable. Please try again later.");
+        console.error("Reader init failed:", err);
+        setError(err.response?.data?.error ?? "Failed to load the book. Please try again.");
+        setIsLoading(false);
       }
     };
-    fetchMeta();
+
+    initReader();
+
+    return () => {
+      if (flipTimerRef.current) clearTimeout(flipTimerRef.current);
+      if (epubBook) epubBook.destroy();
+    };
   }, [id, user]);
 
-  // Step 2: called when user clicks "Start Reading"
-  const startReading = async () => {
-    if (!bookMeta) return;
-    setPhase("reading");
-
-    await new Promise(resolve => setTimeout(resolve, 50));
-
-    try {
-      const epubResponse = await axios.get(`/api/books/epub-proxy/${id}`, {
-      responseType: "arraybuffer",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const epubBook = ePub(epubResponse.data);
-      bookRef.current = epubBook;
-
-      if (!viewerRef.current) return;
-      const rendition = epubBook.renderTo(viewerRef.current, {        width:   "100%",
-        height:  "100%",
-        flow:    "paginated",
-        manager: "default",
-        allowScriptedContent: true,
-      });
-      renditionRef.current = rendition;
-
-    (rendition.themes as any).override("body", {
-      "color": "#2C1810",
-      "background": "#FAF6EE",
-      "font-family": "Georgia, serif",
-      "padding": "20px 40px",
-      "line-height": "1.8",
-    });
-
-      epubBook.loaded.navigation.then((nav) => {
-        setToc(nav.toc ?? []);
-      });
-
-      epubBook.ready
-        .then(() => epubBook.locations.generate(1600))
-        .then(() => setTotalPages(epubBook.locations.length()));
-
-      const reset = searchParams.get("reset") === "true";
-      if (savedCfi && !reset) {
-        rendition.display(savedCfi);
-      } else {
-        rendition.display();
-      }
-
-      rendition.on("relocated", (location: any) => {
-        const cfi     = location.start.cfi;
-        const pct     = (epubBook.locations.percentageFromCfi(cfi) ?? 0) * 100;
-        const pageNum = epubBook.locations.locationFromCfi(cfi) ?? 0;
-
-        setProgress(pct);
-        setCurrentPage(Number(pageNum) || 0);
-        const navItem = epubBook.navigation?.get(cfi);
-        if (navItem?.label) setChapter(navItem.label);
-
-        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = setTimeout(() => {
-          axios.post(
-            `/api/progress`,
-            { bookId: id, last_location: cfi, percentage: pct },
-            { headers: { Authorization: `Bearer ${token}` } }
-          ).catch((err) => console.error("Progress save failed:", err));
-        }, 2000);
-      });
-
-      rendition.themes.fontSize(`${fontSize}px`);
-
-    } catch (err: any) {
-      console.error("Reader init failed:", err);
-      setError("Book is currently unavailable. Please try again later.");
-    }
-  };
-
+  // ── Keyboard navigation ──────────────────────────────────────────────────
   useEffect(() => {
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      if (bookRef.current) bookRef.current.destroy();
+    const handleKey = (e: KeyboardEvent) => {
+      if (isEditingPage) return;
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+
+      if (e.key === "ArrowRight" || e.key === "ArrowDown" || e.key === " ") {
+        e.preventDefault();
+        triggerFlip("right", () => renditionRef.current?.next());
+      } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+        e.preventDefault();
+        triggerFlip("left", () => renditionRef.current?.prev());
+      }
     };
+
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [isEditingPage]);
+
+  // ── Layout switch ────────────────────────────────────────────────────────
+  const switchLayout = useCallback((newLayout: "spread" | "single") => {
+    const book      = bookRef.current;
+    const container = viewerRef.current;
+    if (!book || !container) return;
+
+    setLayout(newLayout);
+    setIsLoading(true);
+
+    mountRendition(book, container, newLayout, currentCfiRef.current, fontSize, isDark);
+  }, [fontSize, isDark, mountRendition]);
+
+  const toggleDark = useCallback(() => {
+    const book      = bookRef.current;
+    const container = viewerRef.current;
+    const newDark   = !isDark;
+    setIsDark(newDark);
+    if (!book || !container) return;
+    setIsLoading(true);
+    mountRendition(book, container, layout, currentCfiRef.current, fontSize, newDark);
+  }, [isDark, layout, fontSize, mountRendition]);
+
+  // ── Flip animation ───────────────────────────────────────────────────────
+  const triggerFlip = useCallback((dir: "right" | "left", action: () => void) => {
+    action();
+    setFlipDir(dir);
+    if (flipTimerRef.current) clearTimeout(flipTimerRef.current);
+    flipTimerRef.current = setTimeout(() => setFlipDir(""), 350);
   }, []);
 
-  const handlePrev = () => renditionRef.current?.prev();
-  const handleNext = () => renditionRef.current?.next();
+  const handlePrev = () => triggerFlip("left",  () => renditionRef.current?.prev());
+  const handleNext = () => triggerFlip("right", () => renditionRef.current?.next());
+
+  // ── Page jump ────────────────────────────────────────────────────────────
+  const openPageInput = () => {
+    setPageInputValue(String(currentPage));
+    setIsEditingPage(true);
+    setTimeout(() => pageInputRef.current?.select(), 0);
+  };
+
+  const commitPageJump = () => {
+    const book = bookRef.current;
+    const n    = parseInt(pageInputValue, 10);
+    setIsEditingPage(false);
+
+    if (!book || isNaN(n) || n < 1 || n > totalPages) return;
+
+    const cfi = book.locations.cfiFromLocation(n);
+    if (cfi) renditionRef.current?.display(cfi);
+  };
+
+  const handlePageInputKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter")  commitPageJump();
+    if (e.key === "Escape") setIsEditingPage(false);
+  };
 
   const changeFontSize = (delta: number) => {
     const newSize = Math.max(12, Math.min(32, fontSize + delta));
     setFontSize(newSize);
     renditionRef.current?.themes.fontSize(`${newSize}px`);
+    (renditionRef.current?.themes as any)?.override("body", { "font-size": `${newSize}px` });
   };
 
   const jumpTo = (href: string) => {
@@ -171,144 +372,189 @@ export default function Reader() {
     }
   };
 
-  // Error screen
-  if (error) return (
-    <div className="flex flex-col items-center justify-center h-screen gap-4 text-tan-oak">
-      <p className="text-xl font-serif font-bold text-center px-8">{error}</p>
-      <button onClick={() => navigate(`/book/${id}`)} className="text-sm underline hover:text-dark-walnut">
-        ← Return to Library
-      </button>
-    </div>
-  );
+  const controlBtn = `px-2 py-1.5 hover:opacity-80 text-sm font-bold transition-colors`;
 
-  // Cover page — shown while metadata loads and before reading starts
-  if (phase === "cover" && bookMeta) return (
-    <div className="fixed inset-0 bg-warm-linen flex flex-col items-center justify-center z-[100] p-8">
-      <div className="max-w-md w-full bg-parchment border border-dust rounded-2xl shadow-2xl overflow-hidden">
-        {bookMeta.coverUrl && (
-          <div className="w-full h-72 overflow-hidden">
-            <img
-              src={bookMeta.coverUrl}
-              alt={bookMeta.title}
-              className="w-full h-full object-cover"
-              referrerPolicy="no-referrer"
-            />
-          </div>
-        )}
-        <div className="p-10 text-center">
-          <h1 className="text-3xl font-serif font-bold text-dark-walnut mb-2">{bookMeta.title}</h1>
-          <p className="text-tan-oak font-medium italic mb-2">{bookMeta.author}</p>
-          {bookMeta.category && (
-            <p className="text-[10px] font-bold uppercase tracking-widest text-dust mb-8">{bookMeta.category}</p>
-          )}
-          {savedCfi && (
-            <p className="text-sm text-library-green font-medium mb-6">
-              You have a saved position — pick up where you left off!
-            </p>
-          )}
-          <div className="flex flex-col gap-3">
-            <button
-              onClick={startReading}
-              className="w-full bg-library-green text-white py-4 rounded-lg font-bold hover:bg-[#3D5A4C] transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2"
-            >
-              <BookOpen size={18} />
-              {savedCfi ? "Continue Reading" : "Start Reading"}
-            </button>
-            {savedCfi && (
-              <button
-                onClick={() => { setSavedCfi(null); startReading(); }}
-                className="w-full border border-dust text-tan-oak py-3 rounded-lg font-bold hover:bg-warm-linen transition-all text-sm"
-              >
-                Start from Beginning
-              </button>
-            )}
-            <button
-              onClick={() => navigate(`/book/${id}`)}
-              className="w-full border border-dust text-tan-oak py-3 rounded-lg font-bold hover:bg-warm-linen transition-all text-sm"
-            >
-              ← Back to Book Details
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  // Fetching metadata still
-  if (phase === "cover" && !bookMeta) return (
-    <div className="flex items-center justify-center h-screen text-tan-oak">
-      <p className="font-serif italic text-xl animate-pulse">Fetching book details…</p>
-    </div>
-  );
-
-  // Loading epub after Start Reading clicked
-  if (phase === "loading") return (
-  <div className="flex flex-col items-center justify-center h-screen text-tan-oak gap-4">
-    <p className="font-serif italic text-xl animate-pulse">Opening {bookMeta?.title}…</p>
-    <p className="text-sm text-dust">This may take a moment for larger books</p>
-  </div>
-);
-
-  // Reading view
   return (
-    <div className="fixed inset-0 bg-warm-linen flex flex-col z-[100]">
+    <div
+      className="fixed inset-0 flex flex-col z-[100]"
+      style={{ background: colors.pageBg, color: colors.body }}
+    >
+      {/* Loading overlay */}
+      {isLoading && !error && (
+        <div
+          className="absolute inset-0 z-[200] flex flex-col items-center justify-center gap-4"
+          style={{ background: colors.pageBg }}
+        >
+          <div
+            className="w-10 h-10 border-2 rounded-full animate-spin"
+            style={{ borderColor: colors.border, borderTopColor: colors.accent }}
+          />
+          <p className="font-serif italic text-lg" style={{ color: colors.body }}>
+            {bookMeta ? `Opening ${bookMeta.title}…` : "Loading…"}
+          </p>
+          <p className="text-xs" style={{ color: colors.border }}>This may take a moment for larger books</p>
+        </div>
+      )}
 
-      {/* Header */}
-      <header className="h-16 border-b border-dust flex items-center justify-between px-6 bg-warm-linen shrink-0">
-        <div className="flex items-center gap-4">
+      {/* Error overlay */}
+      {error && (
+        <div
+          className="absolute inset-0 z-[200] flex flex-col items-center justify-center gap-4"
+          style={{ background: colors.pageBg }}
+        >
+          <p className="text-xl font-serif font-bold text-center px-8" style={{ color: colors.heading }}>{error}</p>
           <button
             onClick={() => navigate(`/book/${id}`)}
-            className="flex items-center gap-1 text-tan-oak hover:text-dark-walnut transition-colors"
+            className="text-sm underline"
+            style={{ color: colors.body }}
+          >
+            ← Back to book
+          </button>
+        </div>
+      )}
+
+      {/* ── Header ────────────────────────────────────────────────────────── */}
+      <header
+        className="h-14 flex items-center justify-between px-4 md:px-6 shrink-0 z-10 border-b"
+        style={{ background: colors.pageBg, borderColor: colors.border }}
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={() => navigate(`/book/${id}`)}
+            className="flex items-center gap-1 transition-colors shrink-0"
+            style={{ color: colors.body }}
           >
             <ChevronLeft size={20} />
-            <span className="text-sm font-bold uppercase tracking-widest">Back</span>
+            <span className="text-xs font-bold uppercase tracking-widest hidden sm:inline">Back</span>
           </button>
-          <h1 className="text-lg font-serif font-bold truncate max-w-md text-dark-walnut">
-            {bookMeta.title} — {bookMeta.author}
+          <h1
+            className="text-sm md:text-base font-serif font-bold truncate"
+            style={{ color: colors.heading }}
+          >
+            {bookMeta ? `${bookMeta.title} — ${bookMeta.author}` : ""}
           </h1>
         </div>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center border border-dust rounded-lg overflow-hidden bg-parchment">
-            <button onClick={() => changeFontSize(-2)}
-              className="px-3 py-1.5 hover:bg-warm-linen border-r border-dust text-sm font-bold text-tan-oak">A-</button>
-            <button onClick={() => changeFontSize(2)}
-              className="px-3 py-1.5 hover:bg-warm-linen text-sm font-bold text-tan-oak">A+</button>
+
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Layout toggle */}
+          <div
+            className="hidden sm:flex items-center rounded-lg overflow-hidden border"
+            style={{ borderColor: colors.border, background: colors.cardBg }}
+          >
+            <button
+              onClick={() => layout !== "single" && switchLayout("single")}
+              className={`px-3 py-1.5 text-xs font-bold transition-colors border-r`}
+              style={{
+                borderColor:      colors.border,
+                background:       layout === "single" ? colors.heading : "transparent",
+                color:            layout === "single" ? colors.cardBg  : colors.body,
+              }}
+            >
+              1 Page
+            </button>
+            <button
+              onClick={() => layout !== "spread" && switchLayout("spread")}
+              className={`px-3 py-1.5 text-xs font-bold transition-colors flex items-center gap-1`}
+              style={{
+                background: layout === "spread" ? colors.heading : "transparent",
+                color:      layout === "spread" ? colors.cardBg  : colors.body,
+              }}
+            >
+              <BookOpen size={13} /> 2 Pages
+            </button>
           </div>
-          <button onClick={toggleFullscreen}
-            className="p-2 text-tan-oak hover:text-dark-walnut border border-dust rounded-lg bg-parchment transition-colors">
-            {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+
+          {/* Font size */}
+          <div
+            className="flex items-center rounded-lg overflow-hidden border"
+            style={{ borderColor: colors.border, background: colors.cardBg }}
+          >
+            <button
+              onClick={() => changeFontSize(-2)}
+              className={`${controlBtn} border-r`}
+              style={{ borderColor: colors.border, color: colors.body }}
+            >A-</button>
+            <button
+              onClick={() => changeFontSize(+2)}
+              className={controlBtn}
+              style={{ color: colors.body }}
+            >A+</button>
+          </div>
+
+          {/* Dark mode toggle */}
+          <button
+            onClick={toggleDark}
+            className="p-1.5 rounded-lg border transition-colors"
+            style={{ borderColor: colors.border, background: colors.cardBg, color: colors.body }}
+            title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+          >
+            {isDark ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
+
+          {/* Fullscreen */}
+          <button
+            onClick={toggleFullscreen}
+            className="p-1.5 rounded-lg border transition-colors"
+            style={{ borderColor: colors.border, background: colors.cardBg, color: colors.body }}
+          >
+            {isFullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
           </button>
         </div>
       </header>
 
-      {/* Progress bar */}
-      <div className="h-10 bg-parchment border-b border-dust flex items-center justify-between px-6 text-[10px] font-bold uppercase tracking-widest text-dust shrink-0">
-        <div className="flex items-center gap-4">
-          <span className="text-tan-oak truncate max-w-xs">{chapter || "—"}</span>
-          <span>|</span>
-          <span>Page {currentPage} of {totalPages}</span>
+      {/* ── Progress strip ──────────────────────────────────────────────── */}
+      <div
+        className="h-9 flex items-center justify-between px-4 md:px-6 text-[9px] font-bold uppercase tracking-widest border-b shrink-0"
+        style={{ background: colors.cardBg, borderColor: colors.border, color: colors.border }}
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="truncate max-w-[140px] md:max-w-xs" style={{ color: colors.body }}>
+            {chapter || "—"}
+          </span>
         </div>
-        <div className="flex items-center gap-4">
-          <div className="w-48 h-1 bg-dust rounded-full overflow-hidden">
-            <div className="h-full bg-aged-gold transition-all duration-300" style={{ width: `${progress}%` }} />
+        <div className="flex items-center gap-3">
+          <div className="w-24 md:w-48 h-1 rounded-full overflow-hidden" style={{ background: colors.border }}>
+            <div
+              className="h-full transition-all duration-300"
+              style={{ width: `${progress}%`, background: colors.accent }}
+            />
           </div>
-          <span className="text-tan-oak">{Math.round(progress)}% complete</span>
+          <span style={{ color: colors.body }}>{Math.round(progress)}%</span>
         </div>
       </div>
 
+      {/* ── Main reading area ────────────────────────────────────────────── */}
       <div className="flex-1 flex relative overflow-hidden">
-
         {/* TOC Sidebar */}
-        <div className={`absolute inset-y-0 left-0 w-80 bg-parchment border-r border-dust z-50 transform transition-transform duration-300 ease-in-out shadow-2xl
-          ${isSidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
-          <div className="p-8 h-full flex flex-col">
-            <h2 className="text-[10px] font-bold uppercase tracking-widest text-dust mb-8">Table of Contents</h2>
-            <div className="flex-1 overflow-y-auto space-y-1">
+        <div
+          className={`absolute inset-y-0 left-0 w-72 z-50 transform transition-transform duration-300 ease-in-out shadow-2xl border-r
+            ${isSidebarOpen ? "translate-x-0" : "-translate-x-full"}`}
+          style={{ background: colors.cardBg, borderColor: colors.border }}
+        >
+          <div className="p-6 h-full flex flex-col">
+            <div className="flex items-center justify-between mb-6">
+              <h2
+                className="text-[9px] font-bold uppercase tracking-widest"
+                style={{ color: colors.border }}
+              >Table of Contents</h2>
+              <button
+                onClick={() => setIsSidebarOpen(false)}
+                className="text-lg leading-none"
+                style={{ color: colors.border }}
+              >✕</button>
+            </div>
+            <div className="flex-1 overflow-y-auto space-y-0.5">
               {toc.length === 0
-                ? <p className="text-sm text-dust italic">No chapters available.</p>
+                ? <p className="text-sm italic" style={{ color: colors.border }}>No chapters available.</p>
                 : toc.map((item, i) => (
-                    <button key={i} onClick={() => jumpTo(item.href)}
-                      className="w-full text-left p-4 text-sm font-serif font-medium text-tan-oak hover:text-dark-walnut hover:bg-warm-linen rounded-lg transition-all border-b border-warm-linen last:border-0">
+                    <button
+                      key={i}
+                      onClick={() => jumpTo(item.href)}
+                      className="w-full text-left px-3 py-2.5 text-sm font-serif font-medium rounded-md transition-all"
+                      style={{ color: colors.body }}
+                      onMouseEnter={e => (e.currentTarget.style.background = colors.pageBg)}
+                      onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                    >
                       {item.label}
                     </button>
                   ))
@@ -317,29 +563,112 @@ export default function Reader() {
           </div>
         </div>
 
-        {/* EPUB Viewport */}
-        <div className="flex-1 flex flex-col items-center justify-center bg-warm-linen p-4 md:p-12">
-          <div className="w-full max-w-3xl h-full bg-parchment shadow-2xl relative border border-dust rounded-sm overflow-hidden">
-            <div ref={viewerRef} className="w-full h-full relative z-10" style={{ minHeight: "600px" }} />
+        {isSidebarOpen && (
+          <div className="absolute inset-0 z-40 bg-black/20" onClick={() => setIsSidebarOpen(false)} />
+        )}
+
+        {/* ── Book viewport ──────────────────────────────────────────────── */}
+        <div
+          className="flex-1 flex items-stretch justify-center overflow-hidden relative"
+          style={{ background: isDark ? "#161412" : "#E8E0D0" }}
+        >
+          {flipDir && (
+            <div className={`absolute inset-0 z-30 ${flipDir === "right" ? "flip-overlay-right" : "flip-overlay-left"}`} />
+          )}
+
+          <div
+            className={`relative flex-1 mx-auto flex flex-col ${layout === "spread" ? "max-w-5xl" : "max-w-2xl"}`}
+            style={{
+              boxShadow: layout === "spread"
+                ? "0 0 60px rgba(0,0,0,0.22)"
+                : "0 0 40px rgba(0,0,0,0.18)",
+            }}
+          >
+            {layout === "spread" && (
+              <div
+                className="absolute inset-y-0 left-1/2 w-[2px] -translate-x-px z-20 pointer-events-none"
+                style={{ background: "linear-gradient(to right, rgba(0,0,0,0.12), rgba(0,0,0,0.04), rgba(0,0,0,0.12))" }}
+              />
+            )}
+
             <button
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className="absolute left-6 top-6 p-3 bg-parchment/80 backdrop-blur border border-dust rounded-lg shadow-sm hover:bg-parchment transition-all z-20 text-tan-oak hover:text-dark-walnut"
+              className="absolute left-4 top-4 p-2.5 rounded-lg shadow-sm transition-all z-30 border backdrop-blur"
+              style={{
+                background:   `${colors.cardBg}E6`,
+                borderColor:  colors.border,
+                color:        colors.body,
+              }}
             >
-              <List size={20} />
+              <List size={18} />
             </button>
+
+            <div
+              ref={viewerRef}
+              className="flex-1"
+              style={{ minHeight: "500px", background: colors.readerBg }}
+            />
           </div>
         </div>
       </div>
 
-      {/* Footer Navigation */}
-      <footer className="h-24 border-t border-dust flex items-center justify-center gap-16 bg-warm-linen shrink-0">
-        <button onClick={handlePrev}
-          className="flex items-center gap-3 px-10 py-4 border border-dust rounded-lg font-bold text-sm text-tan-oak hover:bg-parchment hover:text-dark-walnut transition-all active:scale-95 shadow-sm">
-          <ChevronLeft size={20} /> Previous
+      {/* ── Footer navigation ────────────────────────────────────────────── */}
+      <footer
+        className="h-16 border-t flex items-center justify-between px-4 md:px-8 shrink-0"
+        style={{ background: colors.pageBg, borderColor: colors.border }}
+      >
+        <button
+          onClick={handlePrev}
+          className="flex items-center gap-2 px-5 md:px-8 py-3 border rounded-lg font-bold text-sm transition-all active:scale-95 shadow-sm"
+          style={{ borderColor: colors.border, background: colors.cardBg, color: colors.body }}
+        >
+          <ChevronLeft size={18} />
+          <span className="hidden sm:inline">Previous</span>
         </button>
-        <button onClick={handleNext}
-          className="flex items-center gap-3 px-10 py-4 border border-dust rounded-lg font-bold text-sm text-tan-oak hover:bg-parchment hover:text-dark-walnut transition-all active:scale-95 shadow-sm">
-          Next <ChevronRight size={20} />
+
+        <div
+          className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest"
+          style={{ color: colors.border }}
+        >
+          {isEditingPage ? (
+            <input
+              ref={pageInputRef}
+              type="number"
+              min={1}
+              max={totalPages}
+              value={pageInputValue}
+              onChange={e => setPageInputValue(e.target.value)}
+              onKeyDown={handlePageInputKey}
+              onBlur={commitPageJump}
+              className="w-16 text-center text-sm font-bold rounded-md px-2 py-1 outline-none border"
+              style={{
+                background:  colors.cardBg,
+                color:       colors.heading,
+                borderColor: colors.accent,
+              }}
+              autoFocus
+            />
+          ) : (
+            <button
+              onClick={openPageInput}
+              title="Click to jump to a page"
+              className="flex items-center gap-1 transition-colors group"
+            >
+              <span className="group-hover:underline underline-offset-2" style={{ color: colors.body }}>
+                {currentPage > 0 ? currentPage : "—"}
+              </span>
+              <span style={{ color: colors.border }}>/ {totalPages || "—"}</span>
+            </button>
+          )}
+        </div>
+
+        <button
+          onClick={handleNext}
+          className="flex items-center gap-2 px-5 md:px-8 py-3 border rounded-lg font-bold text-sm transition-all active:scale-95 shadow-sm"
+          style={{ borderColor: colors.border, background: colors.cardBg, color: colors.body }}
+        >
+          <span className="hidden sm:inline">Next</span>
+          <ChevronRight size={18} />
         </button>
       </footer>
     </div>
