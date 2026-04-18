@@ -1,9 +1,7 @@
-// Reader.tsx
-
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import ePub, { Rendition, Book } from "epubjs";
-import { ChevronLeft, Maximize, Minimize, ChevronRight, List } from "lucide-react";
+import { ChevronLeft, Maximize, Minimize, ChevronRight, List, BookOpen } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import axios from "axios";
 
@@ -28,109 +26,126 @@ export default function Reader() {
   const [fontSize,      setFontSize]      = useState(18);
   const [isFullscreen,  setIsFullscreen]  = useState(false);
   const [error,         setError]         = useState("");
+  const [phase,         setPhase]         = useState<"cover" | "loading" | "reading">("cover");
+  const [savedCfi,      setSavedCfi]      = useState<string | null>(null);
 
   const token = localStorage.getItem("token");
 
+  // Check browser compatibility
   useEffect(() => {
-    let epubBook: Book | null = null;
+    if (typeof window === "undefined" || !window.CSS) {
+      setError("Your browser does not support EPUB reading. Please use a modern browser.");
+    }
+  }, []);
 
-    const initReader = async () => {
-      if (!id || !user || !viewerRef.current) return;
+  // Step 1: fetch book metadata + saved progress, show cover page
+  useEffect(() => {
+    if (!id || !user) return;
+    const fetchMeta = async () => {
       try {
-        // 1. Fetch book metadata
-        const bookRes  = await axios.get(`/api/books/${id}`, {
+        const bookRes = await axios.get(`/api/books/${id}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        const bookData = bookRes.data;
-        setBookMeta(bookData);
+        setBookMeta(bookRes.data);
 
-        // 2. Load EPUB from server endpoint
-        // epubUrl is now a local server path (e.g., /api/books/epub/123)
-        const epubSource = bookData.epubUrl;
-        if (!epubSource) {
-          setError("No EPUB URL found for this book.");
-          return;
-        }
-
-        epubBook        = ePub(epubSource);
-        bookRef.current = epubBook;
-
-        const rendition = epubBook.renderTo(viewerRef.current, {
-          width:   "100%",
-          height:  "100%",
-          flow:    "paginated",
-          manager: "default",
-        });
-        renditionRef.current = rendition;
-
-        // 3. TOC
-        epubBook.loaded.navigation.then((nav) => {
-          setToc(nav.toc ?? []);
-        });
-
-        // 4. Page locations
-        epubBook.ready
-          .then(() => epubBook!.locations.generate(1600))
-          .then(()  => setTotalPages(epubBook!.locations.length()));
-
-        // 5. Existing reading progress
-        let savedCfi: string | null = null;
         try {
           const progressRes = await axios.get(`/api/progress/${id}`, {
             headers: { Authorization: `Bearer ${token}` },
           });
-          if (progressRes.status === 200 && progressRes.data?.last_location) {
-            savedCfi = progressRes.data.last_location;
+          if (progressRes.data?.last_location) {
+            setSavedCfi(progressRes.data.last_location);
           }
-        } catch (e: any) {
-          if (e.response?.status !== 204) console.warn("Progress fetch:", e.message);
+        } catch {
+          // no saved progress, that's fine
         }
-
-        const reset = searchParams.get("reset") === "true";
-        if (savedCfi && !reset) {
-          rendition.display(savedCfi);
-        } else {
-          rendition.display();
-        }
-
-        // 6. Track page changes
-        rendition.on("relocated", (location: any) => {
-          const cfi     = location.start.cfi;
-          const pct     = (epubBook!.locations.percentageFromCfi(cfi) ?? 0) * 100;
-          const pageNum = epubBook!.locations.locationFromCfi(cfi) ?? 0;
-
-          setProgress(pct);
-          setCurrentPage(pageNum);
-
-          const navItem = epubBook!.navigation?.get(cfi);
-          if (navItem?.label) setChapter(navItem.label);
-
-          // Debounced save — PUT /api/progress/{book_id}
-          if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-          saveTimerRef.current = setTimeout(() => {
-            axios.put(
-              `/api/progress/${id}`,
-              { last_location: cfi, percentage: pct },
-              { headers: { Authorization: `Bearer ${token}` } }
-            ).catch((err) => console.error("Progress save failed:", err));
-          }, 2000);
-        });
-
-        rendition.themes.fontSize(`${fontSize}px`);
-
       } catch (err: any) {
-        console.error("Reader init failed:", err);
-        setError(err.response?.data?.error ?? "Failed to load the book. Please try again.");
+        setError("Book is currently unavailable. Please try again later.");
       }
     };
+    fetchMeta();
+  }, [id, user]);
 
-    initReader();
+  // Step 2: called when user clicks "Start Reading"
+  const startReading = async () => {
+    if (!bookMeta) return;
+    setPhase("reading");
 
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    try {
+      const epubResponse = await axios.get(`/api/books/epub-proxy/${id}`, {
+      responseType: "arraybuffer",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const epubBook = ePub(epubResponse.data);
+      bookRef.current = epubBook;
+
+      if (!viewerRef.current) return;
+      const rendition = epubBook.renderTo(viewerRef.current, {        width:   "100%",
+        height:  "100%",
+        flow:    "paginated",
+        manager: "default",
+        allowScriptedContent: true,
+      });
+      renditionRef.current = rendition;
+
+    (rendition.themes as any).override("body", {
+      "color": "#2C1810",
+      "background": "#FAF6EE",
+      "font-family": "Georgia, serif",
+      "padding": "20px 40px",
+      "line-height": "1.8",
+    });
+
+      epubBook.loaded.navigation.then((nav) => {
+        setToc(nav.toc ?? []);
+      });
+
+      epubBook.ready
+        .then(() => epubBook.locations.generate(1600))
+        .then(() => setTotalPages(epubBook.locations.length()));
+
+      const reset = searchParams.get("reset") === "true";
+      if (savedCfi && !reset) {
+        rendition.display(savedCfi);
+      } else {
+        rendition.display();
+      }
+
+      rendition.on("relocated", (location: any) => {
+        const cfi     = location.start.cfi;
+        const pct     = (epubBook.locations.percentageFromCfi(cfi) ?? 0) * 100;
+        const pageNum = epubBook.locations.locationFromCfi(cfi) ?? 0;
+
+        setProgress(pct);
+        setCurrentPage(Number(pageNum) || 0);
+        const navItem = epubBook.navigation?.get(cfi);
+        if (navItem?.label) setChapter(navItem.label);
+
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = setTimeout(() => {
+          axios.post(
+            `/api/progress`,
+            { bookId: id, last_location: cfi, percentage: pct },
+            { headers: { Authorization: `Bearer ${token}` } }
+          ).catch((err) => console.error("Progress save failed:", err));
+        }, 2000);
+      });
+
+      rendition.themes.fontSize(`${fontSize}px`);
+
+    } catch (err: any) {
+      console.error("Reader init failed:", err);
+      setError("Book is currently unavailable. Please try again later.");
+    }
+  };
+
+  useEffect(() => {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      if (epubBook) epubBook.destroy();
+      if (bookRef.current) bookRef.current.destroy();
     };
-  }, [id, user]);
+  }, []);
 
   const handlePrev = () => renditionRef.current?.prev();
   const handleNext = () => renditionRef.current?.next();
@@ -156,21 +171,85 @@ export default function Reader() {
     }
   };
 
+  // Error screen
   if (error) return (
     <div className="flex flex-col items-center justify-center h-screen gap-4 text-tan-oak">
       <p className="text-xl font-serif font-bold text-center px-8">{error}</p>
       <button onClick={() => navigate(`/book/${id}`)} className="text-sm underline hover:text-dark-walnut">
-        ← Back to book
+        ← Return to Library
       </button>
     </div>
   );
 
-  if (!bookMeta) return (
-    <div className="flex items-center justify-center h-screen text-tan-oak">
-      <p className="font-serif italic text-xl animate-pulse">Loading EPUB…</p>
+  // Cover page — shown while metadata loads and before reading starts
+  if (phase === "cover" && bookMeta) return (
+    <div className="fixed inset-0 bg-warm-linen flex flex-col items-center justify-center z-[100] p-8">
+      <div className="max-w-md w-full bg-parchment border border-dust rounded-2xl shadow-2xl overflow-hidden">
+        {bookMeta.coverUrl && (
+          <div className="w-full h-72 overflow-hidden">
+            <img
+              src={bookMeta.coverUrl}
+              alt={bookMeta.title}
+              className="w-full h-full object-cover"
+              referrerPolicy="no-referrer"
+            />
+          </div>
+        )}
+        <div className="p-10 text-center">
+          <h1 className="text-3xl font-serif font-bold text-dark-walnut mb-2">{bookMeta.title}</h1>
+          <p className="text-tan-oak font-medium italic mb-2">{bookMeta.author}</p>
+          {bookMeta.category && (
+            <p className="text-[10px] font-bold uppercase tracking-widest text-dust mb-8">{bookMeta.category}</p>
+          )}
+          {savedCfi && (
+            <p className="text-sm text-library-green font-medium mb-6">
+              You have a saved position — pick up where you left off!
+            </p>
+          )}
+          <div className="flex flex-col gap-3">
+            <button
+              onClick={startReading}
+              className="w-full bg-library-green text-white py-4 rounded-lg font-bold hover:bg-[#3D5A4C] transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2"
+            >
+              <BookOpen size={18} />
+              {savedCfi ? "Continue Reading" : "Start Reading"}
+            </button>
+            {savedCfi && (
+              <button
+                onClick={() => { setSavedCfi(null); startReading(); }}
+                className="w-full border border-dust text-tan-oak py-3 rounded-lg font-bold hover:bg-warm-linen transition-all text-sm"
+              >
+                Start from Beginning
+              </button>
+            )}
+            <button
+              onClick={() => navigate(`/book/${id}`)}
+              className="w-full border border-dust text-tan-oak py-3 rounded-lg font-bold hover:bg-warm-linen transition-all text-sm"
+            >
+              ← Back to Book Details
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 
+  // Fetching metadata still
+  if (phase === "cover" && !bookMeta) return (
+    <div className="flex items-center justify-center h-screen text-tan-oak">
+      <p className="font-serif italic text-xl animate-pulse">Fetching book details…</p>
+    </div>
+  );
+
+  // Loading epub after Start Reading clicked
+  if (phase === "loading") return (
+  <div className="flex flex-col items-center justify-center h-screen text-tan-oak gap-4">
+    <p className="font-serif italic text-xl animate-pulse">Opening {bookMeta?.title}…</p>
+    <p className="text-sm text-dust">This may take a moment for larger books</p>
+  </div>
+);
+
+  // Reading view
   return (
     <div className="fixed inset-0 bg-warm-linen flex flex-col z-[100]">
 
@@ -202,10 +281,10 @@ export default function Reader() {
         </div>
       </header>
 
-      {/* Progress bar strip */}
+      {/* Progress bar */}
       <div className="h-10 bg-parchment border-b border-dust flex items-center justify-between px-6 text-[10px] font-bold uppercase tracking-widest text-dust shrink-0">
         <div className="flex items-center gap-4">
-          <span className="text-tan-oak truncate max-w-xs">{chapter || "Loading…"}</span>
+          <span className="text-tan-oak truncate max-w-xs">{chapter || "—"}</span>
           <span>|</span>
           <span>Page {currentPage} of {totalPages}</span>
         </div>
@@ -241,8 +320,7 @@ export default function Reader() {
         {/* EPUB Viewport */}
         <div className="flex-1 flex flex-col items-center justify-center bg-warm-linen p-4 md:p-12">
           <div className="w-full max-w-3xl h-full bg-parchment shadow-2xl relative border border-dust rounded-sm overflow-hidden">
-            <div className="absolute inset-0 ruled-surface opacity-10 pointer-events-none" />
-            <div ref={viewerRef} className="w-full h-full relative z-10" />
+            <div ref={viewerRef} className="w-full h-full relative z-10" style={{ minHeight: "600px" }} />
             <button
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
               className="absolute left-6 top-6 p-3 bg-parchment/80 backdrop-blur border border-dust rounded-lg shadow-sm hover:bg-parchment transition-all z-20 text-tan-oak hover:text-dark-walnut"

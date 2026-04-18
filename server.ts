@@ -164,7 +164,13 @@ const isAdmin = (req: any, res: any, next: any) => {
 async function startServer() {
   const app = express();
   const PORT = 3000;
-
+  app.use((req, res, next) => {
+    res.setHeader(
+      "Content-Security-Policy",
+      "default-src * 'unsafe-inline' 'unsafe-eval' blob: data:; script-src * 'unsafe-inline' 'unsafe-eval' blob:; style-src * 'unsafe-inline'; img-src * blob: data:; font-src *; connect-src * ws: wss:; worker-src blob:;"
+    );
+    next();
+  });
   app.use(express.json());
 
   try {
@@ -667,6 +673,36 @@ app.post("/api/auth/reset-password", async (req, res) => {
       res.status(500).json({ error: error.message });
     }
   });
+
+  // Proxy route — fetches external epub URLs server-side to avoid CORS
+app.get("/api/books/epub-proxy/:id", async (req, res) => {
+  try {
+    const book = await Book.findById(req.params.id);
+    if (!book) return res.status(404).json({ error: "Book not found" });
+
+    const epubUrl = book.epubUrl;
+
+    res.setHeader("Content-Type", "application/epub+zip");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+
+    // Local uploaded file — serve directly from disk
+    if (epubUrl.startsWith("/api/books/epub-upload/")) {
+      const filename = epubUrl.replace("/api/books/epub-upload/", "");
+      const filePath = path.join(EPUB_DIR, filename);
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ error: "EPUB file not found on disk" });
+      }
+      return res.sendFile(filePath);
+    }
+
+    // External URL (Gutenberg etc) — proxy it
+    const response = await axios.get(epubUrl, { responseType: "stream" });
+    response.data.pipe(res);
+  } catch (err: any) {
+    console.error("EPUB proxy error:", err.message);
+    res.status(500).json({ error: "Failed to fetch EPUB file." });
+  }
+});
 
   // -------------------------------------------------------------------------
   // Vite / Static
