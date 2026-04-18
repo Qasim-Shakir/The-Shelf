@@ -1,0 +1,5 @@
+{
+  "name": "The Shelf",
+  "description": "A web-based public-domain EPUB library with progress tracking and admin ingestion.",
+  "requestFramePermissions": []
+}
