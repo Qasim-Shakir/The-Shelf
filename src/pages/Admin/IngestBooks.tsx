@@ -109,17 +109,18 @@ function ManualUpload({ token }: { token: string | null }) {
     setForm(f => ({ ...f, [k]: e.target.value }));
 
   const submit = async () => {
-    if (!file || !form.title || !form.author) return;
+    if (!file) return;
     setLoading(true);
     setResult(null);
     try {
       const fd = new FormData();
       fd.append("epub_file",   file);
-      fd.append("title",       form.title);
-      fd.append("author",      form.author);
-      fd.append("description", form.description);
-      fd.append("genre",       form.genre);
-      fd.append("language",    form.language || "en");
+      // Only send manual metadata if provided, let server auto-extract otherwise
+      if (form.title)       fd.append("title",       form.title);
+      if (form.author)      fd.append("author",      form.author);
+      if (form.description) fd.append("description", form.description);
+      if (form.genre)       fd.append("genre",       form.genre);
+      if (form.language)    fd.append("language",    form.language);
       if (form.gutenberg_id) fd.append("gutenberg_id", form.gutenberg_id);
       if (coverFile)         fd.append("cover_image",  coverFile);
 
@@ -137,7 +138,7 @@ function ManualUpload({ token }: { token: string | null }) {
     }
   };
 
-  const canSubmit = file && form.title && form.author && !loading;
+  const canSubmit = file && !loading;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
@@ -177,10 +178,11 @@ function ManualUpload({ token }: { token: string | null }) {
       {/* Right – metadata */}
       <div className="space-y-5">
         <h3 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-3">Book Metadata</h3>
+        <p className="text-sm text-slate-600 mb-4">Title, author, and description will be automatically extracted from the EPUB file. You can override them below if needed.</p>
 
         {[
-          { label: "Title",  key: "title",  placeholder: "Auto-extracted or enter manually", required: true },
-          { label: "Author", key: "author", placeholder: "Primary author name",               required: true },
+          { label: "Title",  key: "title",  placeholder: "Auto-extracted from EPUB or enter manually", required: false },
+          { label: "Author", key: "author", placeholder: "Auto-extracted from EPUB or enter manually", required: false },
         ].map(({ label, key, placeholder, required }) => (
           <div key={key}>
             <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
@@ -270,8 +272,7 @@ function BatchUpload({ token }: { token: string | null }) {
       try {
         const fd = new FormData();
         fd.append("epub_file", files[i].file);
-        fd.append("title",     files[i].file.name.replace(".epub", ""));
-        fd.append("author",    "Unknown");
+        // Let the server extract metadata automatically from the EPUB
         await axios.post("/api/admin/books/upload", fd, {
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "multipart/form-data" }
         });

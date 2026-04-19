@@ -11,6 +11,7 @@ import fs from "fs";
 import { createWriteStream } from "fs";
 import { pipeline } from "stream/promises";
 import multer from "multer";
+import { EPub } from "epub";
 import nodemailer from "nodemailer";
 
 declare global {
@@ -529,6 +530,65 @@ app.post("/api/auth/reset-password", async (req, res) => {
     }
   });
 
+  // ── EPUB Metadata Extraction ──────────────────────────────────────────────
+  async function extractEpubMetadata(filePath: string): Promise<{
+    title?: string;
+    author?: string;
+    description?: string;
+    language?: string;
+    coverPath?: string;
+  }> {
+    try {
+      const epub = new EPub(filePath);
+      await epub.parse();
+
+      const metadata = {
+        title: typeof epub.metadata.title === "string" ? epub.metadata.title : undefined,
+        author: typeof epub.metadata.creator === "string" ? epub.metadata.creator : undefined,
+        description: typeof epub.metadata.description === "string"
+          ? epub.metadata.description
+          : typeof epub.metadata.subject === "string"
+            ? epub.metadata.subject
+            : undefined,
+        language: typeof epub.metadata.language === "string" ? epub.metadata.language : undefined,
+        coverPath: undefined as string | undefined,
+      };
+
+      // Extract a cover image if the EPUB manifest includes one
+      const manifestItems = Object.values(epub.manifest || {}) as Array<{ id: string; href: string; [key: string]: unknown }>;
+      const coverItem = manifestItems.find(item => {
+        const mediaType = typeof item["media-type"] === "string" ? item["media-type"] : "";
+        const href = typeof item.href === "string" ? item.href : "";
+        const id = typeof item.id === "string" ? item.id : "";
+        return mediaType.startsWith("image/") && /cover/i.test(id + href);
+      });
+
+      if (coverItem) {
+        try {
+          const image = await epub.getImage(coverItem.id);
+          const extMap: Record<string, string> = {
+            "image/jpeg": ".jpg",
+            "image/jpg": ".jpg",
+            "image/png": ".png",
+            "image/gif": ".gif",
+            "image/svg+xml": ".svg",
+          };
+          const ext = extMap[image.mimeType] || path.extname(coverItem.href) || ".jpg";
+          const coverPath = path.join(path.dirname(filePath), `${path.basename(filePath, path.extname(filePath))}_cover${ext}`);
+          fs.writeFileSync(coverPath, image.data);
+          metadata.coverPath = coverPath;
+        } catch (err) {
+          console.warn("Failed to extract cover image from EPUB:", err);
+        }
+      }
+
+      return metadata;
+    } catch (error) {
+      console.warn("Failed to parse EPUB metadata:", error);
+      return {};
+    }
+  }
+
   // ✅ NEW: Upload EPUB file endpoint
   app.post("/api/admin/books/upload", verifyToken, isAdmin, upload.fields([
     { name: "epub_file", maxCount: 1 },
@@ -542,40 +602,61 @@ app.post("/api/auth/reset-password", async (req, res) => {
         return res.status(400).json({ error: "EPUB file is required" });
       }
 
-      const { title, author, description = "", genre = "Uploaded", language = "en", gutenberg_id } = req.body;
-
-      if (!title || !author) {
-        // Clean up uploaded files if metadata is missing
-        epubFiles.forEach(f => fs.unlinkSync(f.path));
-        files?.cover_image?.forEach(f => fs.unlinkSync(f.path));
-        return res.status(400).json({ error: "Title and author are required" });
-      }
-
       const epubFile = epubFiles[0];
       const coverFile = files?.cover_image?.[0];
+
+      // Extract metadata from the EPUB file
+      const extractedMetadata = await extractEpubMetadata(epubFile.path);
+
+      // Use provided values or fall back to extracted metadata
+      const { title, author, description = "", genre = "Uploaded", language = "en", gutenberg_id } = req.body;
+
+      const finalTitle = title || extractedMetadata.title || epubFile.originalname.replace(/\.epub$/i, "");
+      const finalAuthor = author || extractedMetadata.author || "Unknown";
+      const finalDescription = description || extractedMetadata.description || "";
+      const finalLanguage = language || extractedMetadata.language || "en";
+
+      // For batch uploads, we might not have manual metadata, so use extracted or defaults
+      if (!finalTitle || !finalAuthor) {
+        // Clean up uploaded files if we still don't have required metadata
+        epubFiles.forEach(f => fs.unlinkSync(f.path));
+        files?.cover_image?.forEach(f => fs.unlinkSync(f.path));
+        return res.status(400).json({ error: "Could not extract title and author from EPUB file. Please provide them manually." });
+      }
+
       const epubRelativePath = `/api/books/epub-upload/${epubFile.filename}`;
 
       let coverUrl = "";
-      // If a cover image was uploaded, save it next to the EPUB
+      // If a cover image was uploaded manually, use it
       if (coverFile) {
         const coverPath = path.join(COVERS_DIR, coverFile.filename);
         try {
           fs.renameSync(coverFile.path, coverPath);
           coverUrl = `/api/books/cover-upload/${coverFile.filename}`;
         } catch (err) {
-          console.warn("Failed to move cover image:", err);
-          // Continue without cover if it fails
+          console.warn("Failed to move uploaded cover image:", err);
+        }
+      }
+      // Otherwise, try to use extracted cover from EPUB
+      else if (extractedMetadata.coverPath && fs.existsSync(extractedMetadata.coverPath)) {
+        try {
+          const coverFilename = `${epubFile.filename.replace(/\.epub$/i, '')}_cover${path.extname(extractedMetadata.coverPath)}`;
+          const coverPath = path.join(COVERS_DIR, coverFilename);
+          fs.copyFileSync(extractedMetadata.coverPath, coverPath);
+          coverUrl = `/api/books/cover-upload/${coverFilename}`;
+        } catch (err) {
+          console.warn("Failed to extract cover from EPUB:", err);
         }
       }
 
       const bookData: any = {
-        title,
-        author,
+        title: finalTitle,
+        author: finalAuthor,
         category: genre,
         epubUrl: epubRelativePath,
         coverUrl,
-        description,
-        language,
+        description: finalDescription,
+        language: finalLanguage,
       };
 
       // Add gutenberg_id if provided

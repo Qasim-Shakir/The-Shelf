@@ -19,6 +19,7 @@
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "dotenv": "^17.2.3",
+    "epub": "^2.1.1",
     "epubjs": "^0.3.93",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.3",

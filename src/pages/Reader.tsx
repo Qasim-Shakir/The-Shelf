@@ -499,6 +499,16 @@ export default function Reader() {
           >
             {isFullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
           </button>
+
+          {/* Table of Contents */}
+          <button
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            className="p-1.5 rounded-lg border transition-colors"
+            style={{ borderColor: colors.border, background: colors.cardBg, color: colors.body }}
+            title="Toggle table of contents"
+          >
+            <List size={16} />
+          </button>
         </div>
       </header>
 
@@ -590,18 +600,6 @@ export default function Reader() {
                 style={{ background: "linear-gradient(to right, rgba(0,0,0,0.12), rgba(0,0,0,0.04), rgba(0,0,0,0.12))" }}
               />
             )}
-
-            <button
-              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className="absolute left-4 top-4 p-2.5 rounded-lg shadow-sm transition-all z-30 border backdrop-blur"
-              style={{
-                background:   `${colors.cardBg}E6`,
-                borderColor:  colors.border,
-                color:        colors.body,
-              }}
-            >
-              <List size={18} />
-            </button>
 
             <div
               ref={viewerRef}
