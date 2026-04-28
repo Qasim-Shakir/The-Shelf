@@ -1,185 +1,292 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
-
 # The Shelf
 
-A web-based public-domain EPUB library with progress tracking and admin ingestion.
+## Project Overview
 
-This contains everything you need to run your app locally.
+The Shelf is a full-stack web application that serves as a public-domain EPUB library with user authentication, reading progress tracking, and admin management features. It allows users to browse, read, and track their progress on public-domain books sourced from Project Gutenberg, while providing administrators with tools to ingest new books via scraping or manual upload.
 
-## Run Locally
+### Tech Stack & Dependencies
 
-**Prerequisites:**  Node.js, MongoDB Atlas account
+**Frontend:**
+- React 19 (latest React with concurrent features)
+- TypeScript (type-safe JavaScript)
+- Vite (fast build tool and development server with HMR)
+- React Router DOM (client-side routing)
+- Tailwind CSS v4 (utility-first CSS framework)
+- Axios (HTTP client for API calls)
+- epub.js (client-side EPUB rendering)
+- Motion (animation library)
+- Lucide React (icons)
+- clsx & tailwind-merge (CSS utility functions)
 
-### Database Setup (MongoDB Atlas)
-1. Create a free account at [MongoDB Atlas](https://www.mongodb.com/atlas)
-2. Create a new cluster (free tier)
-3. Create a database user and whitelist your IP
-4. Get your connection string from Atlas
-5. Update `MONGODB_URI` in `.env.local` with your Atlas connection string
+**Backend:**
+- Express.js (Node.js web framework)
+- TypeScript (server-side type safety)
+- tsx (TypeScript execution environment)
+- MongoDB (NoSQL database)
+- Mongoose (ODM for MongoDB)
+- bcryptjs (password hashing)
+- jsonwebtoken (JWT authentication)
+- nodemailer (email sending for password reset)
+- multer (file upload handling)
+- epub (EPUB metadata extraction)
+- express-rate-limit (API rate limiting)
+- helmet (security headers)
+- axios (HTTP client for external APIs)
 
-### Application Setup
-1. Install dependencies:
-   `npm install`
-2. Set the `MONGODB_URI` in [.env.local](.env.local) to your MongoDB Atlas connection string
-3. Run the app:
-   `npm run dev`
+**Development & Build Tools:**
+- @vitejs/plugin-react (Vite React plugin)
+- @tailwindcss/vite (Tailwind CSS Vite plugin)
+- autoprefixer (CSS vendor prefixing)
+- mongodb-memory-server (in-memory MongoDB for testing)
+- TypeScript compiler
 
-## Admin User Setup
-By default, new users are created with the `reader` role. To create an admin user, update the `role` field for a user document in MongoDB to `admin`.
+### Entry Points & How the App Starts
 
-If you are using MongoDB Atlas, you can do this from the Atlas UI or via the MongoDB shell:
+The application starts via `npm run dev`, which runs `tsx server.ts`. This starts the Express server on port 3000, which serves the React frontend in development mode using Vite middleware, and handles all API routes.
 
-```js
-db.users.updateOne(
-  { email: "admin@example.com" },
-  { $set: { role: "admin" } }
-)
-```
+In production, the server builds the frontend with `npm run build` and serves the static files directly.
 
-Once a user has `role: "admin"`, they can access protected admin routes such as book ingestion and management.
+## File & Folder Structure
 
-## Technology Stack & Architecture
+### Root Level
+- `index.html` - Main HTML entry point for the React app
+- `metadata.json` - Application metadata (name, description)
+- `package.json` - Node.js dependencies and scripts
+- `server.ts` - Main Express server file (backend entry point)
+- `tsconfig.json` - TypeScript configuration
+- `vite.config.ts` - Vite build configuration
 
-### Overview
-The Shelf is a full-stack web application built with modern JavaScript/TypeScript technologies. It follows a client-server architecture with a React frontend and an Express.js backend, using MongoDB for data persistence.
+### `src/` - Frontend Source Code
+- `App.tsx` - Main React app component with routing
+- `main.tsx` - React app entry point (renders App to DOM)
+- `index.css` - Global styles with Tailwind imports and custom theme colors
+- `vite-env.d.ts` - Vite TypeScript declarations
 
-### Frontend (React + TypeScript)
+#### `src/components/`
+- `Layout.tsx` - Main layout wrapper with navigation and user authentication checks
 
-**Core Technologies:**
-- **React 19** - Modern React with concurrent features and automatic batching
-- **TypeScript** - Type-safe JavaScript for better developer experience and fewer runtime errors
-- **Vite** - Fast build tool and development server with HMR (Hot Module Replacement)
-- **React Router DOM** - Client-side routing for single-page application navigation
+#### `src/context/`
+- `AuthContext.tsx` - React Context for authentication state management
 
-**UI & Styling:**
-- **Tailwind CSS** - Utility-first CSS framework for rapid UI development
-- **Tailwind CSS v4** - Latest version with improved performance and features
-- **Lucide React** - Beautiful, customizable icons
-- **Motion** - Animation library for smooth UI transitions
-- **clsx & tailwind-merge** - Utility functions for conditional CSS classes
+#### `src/lib/`
+- `utils.ts` - Utility functions (CSS class merging)
 
-**State Management:**
-- **React Context API** - Global state management for authentication and user data
-- **Custom Hooks** - Reusable logic for authentication (`useAuth`) and other features
+#### `src/pages/` - Route Components
+- `Landingpage.tsx` - Public landing page with book showcase
+- `Login.tsx` - User login form
+- `Signup.tsx` - User registration form
+- `ForgotPassword.tsx` - Password reset flow
+- `Library.tsx` - Main book browsing interface with search/filter
+- `BookDetail.tsx` - Individual book details page
+- `Reader.tsx` - EPUB reader with progress tracking
+- `Profile.tsx` - User profile with reading history and settings
+- `Coverpage.tsx` - Book reading start/resume interface
 
-**HTTP Client:**
-- **Axios** - Promise-based HTTP client for API communication
+#### `src/pages/Admin/` - Admin Interface
+- `Dashboard.tsx` - Admin dashboard with stats and activity log
+- `IngestBooks.tsx` - Book ingestion interface (manual upload, batch, Gutenberg scraping)
+- `ManageBooks.tsx` - Book management interface (edit, archive, delete)
+- `scraper.py` - Python script for Project Gutenberg scraping
 
-**File Structure:**
-```
-src/
-├── components/     # Reusable UI components (Layout, etc.)
-├── context/        # React Context providers (AuthContext)
-├── lib/           # Utility functions and helpers
-├── pages/         # Route components (Login, Library, Reader, etc.)
-├── App.tsx        # Main app component with routing
-├── main.tsx       # React app entry point
-└── index.css      # Global styles and Tailwind imports
-```
+### `storage/` - File Storage
+- `covers/` - Uploaded book cover images
+- `epub/` - Uploaded EPUB files
 
-### Backend (Express.js + TypeScript)
+### `uploads/` - Temporary Upload Directories
+- `covers/` - Temporary cover uploads during processing
+- `epub/` - Temporary EPUB uploads during processing
 
-**Core Technologies:**
-- **Express.js** - Fast, unopinionated web framework for Node.js
-- **TypeScript** - Type-safe server-side code
-- **tsx** - TypeScript execution environment for development
+## All Variables — Where They Come From and When They're Used
 
-**Database & Data:**
-- **MongoDB** - NoSQL document database for flexible data storage
-- **Mongoose** - ODM (Object Document Mapping) for MongoDB with schema validation
+### Environment Variables (from .env.local)
 
-**Authentication & Security:**
-- **bcryptjs** - Password hashing for secure credential storage
-- **jsonwebtoken (JWT)** - Token-based authentication for session management
-- **Custom middleware** - Authentication verification and admin role checking
+| Name | Type | Where Defined | Where Used | When Changes | Default Value | Required |
+|------|------|---------------|------------|--------------|---------------|----------|
+| `MONGODB_URI` | string | `.env.local` | `server.ts:69` | On server start | `"mongodb://localhost:27017/the-shelf"` | Yes |
+| `JWT_SECRET` | string | `.env.local` | `server.ts:70`, `AuthContext.tsx:4` | On server start | `"your-secret-key"` | Yes (change in production) |
+| `SESSION_DURATION` | string | `.env.local` | `server.ts:71` | On server start | `"24h"` | No |
+| `EMAIL_USER` | string | `.env.local` | `server.ts:27` | On server start | N/A | Yes (for password reset) |
+| `EMAIL_PASS` | string | `.env.local` | `server.ts:28` | On server start | N/A | Yes (for password reset) |
+| `NODE_ENV` | string | `.env.local` | Various files | On server start | `"development"` | No |
 
-**External APIs:**
-- **Axios** - HTTP client for external API calls (Project Gutenberg scraping)
+### Server-Side Constants (server.ts)
 
-**Data Models:**
-- **User** - Authentication, roles (reader/admin), profile data
-- **Book** - EPUB metadata, Gutenberg integration, status tracking
-- **ReadingProgress** - User reading progress, bookmarks, chapter tracking
+| Name | Type | Where Defined | Where Used | When Changes | Default Value |
+|------|------|---------------|------------|--------------|---------------|
+| `STORAGE_DIR` | string | `server.ts:39` | `server.ts:40-41` | On server start | `path.join(__dirname, "storage")` |
+| `EPUB_DIR` | string | `server.ts:40` | Multiple file operations | On server start | `path.join(STORAGE_DIR, "epub")` |
+| `COVERS_DIR` | string | `server.ts:41` | Multiple file operations | On server start | `path.join(STORAGE_DIR, "covers")` |
+| `MONGODB_URI` | string | `server.ts:69` | `mongoose.connect()` | On server start | From env or default |
+| `JWT_SECRET` | string | `server.ts:70` | JWT sign/verify | On server start | From env or default |
+| `SESSION_DURATION` | string | `server.ts:71` | JWT expiration | On server start | From env or default |
 
-### Key Features & Architecture
+### Frontend Constants
 
-**Authentication Flow:**
-1. User registers/logs in through React frontend
-2. Credentials sent to Express API endpoints (`/api/auth/login`, `/api/auth/signup`)
-3. Password hashed with bcrypt, JWT token generated
-4. Token stored in localStorage and included in subsequent requests
-5. `verifyToken` middleware validates requests on protected routes
+| Name | Type | Where Defined | Where Used | When Changes | Default Value |
+|------|------|---------------|------------|--------------|---------------|
+| `INACTIVITY_LIMIT` | number | `AuthContext.tsx:4` | Session timeout logic | On import | `24 * 60 * 60 * 1000` (24 hours) |
+| `ACTIVITY_EVENTS` | string[] | `AuthContext.tsx:5` | Event listeners for activity reset | On import | `["mousemove", "keydown", "mousedown", "touchstart", "scroll"]` |
+| `SORT_OPTIONS` | object[] | `Library.tsx:16-22` | Sort dropdown options | On import | Array of sort options |
+| `GENRE_OPTIONS` | string[] | `Library.tsx:25-33` | Genre filter options | On import | Array of genre strings |
+| `LIGHT_THEME` | object | `Reader.tsx:34-42` | Reader theme colors | On theme change | Color object |
+| `DARK_THEME` | object | `Reader.tsx:46-54` | Reader theme colors | On theme change | Color object |
 
-**Book Management:**
-- Admin users can scrape books from Project Gutenberg API
-- Books stored in MongoDB with metadata (title, author, genre, EPUB URLs)
-- Public access to browse and read books
+### State Variables (React Components)
 
-**Reading Experience:**
-- **EPUB.js** - Client-side EPUB rendering and navigation
-- Progress tracking stored per user per book
-- Chapter and CFI (EPUB Canonical Fragment Identifier) based positioning
+| Component | Variable | Type | Initial Value | When Changes | Where Used |
+|-----------|----------|------|---------------|--------------|------------|
+| AuthContext | `user` | User \| null | `null` | On login/signup/logout | Throughout app for auth checks |
+| AuthContext | `token` | string \| null | From localStorage | On login/signup/logout | API requests |
+| AuthContext | `isAuthReady` | boolean | `false` | After auth check | Loading states |
+| AuthContext | `sessionExpired` | boolean | `false` | On inactivity timeout | Session expired UI |
+| Library | `books` | Book[] | `[]` | On API response | Book grid display |
+| Library | `search` | string | `""` | On user input | Search API calls |
+| Library | `genre` | string | `"All Genres"` | On filter change | Filter API calls |
+| Library | `sort` | string | `"newest"` | On sort change | Sort API calls |
+| Reader | `bookMeta` | object \| null | `null` | On book load | Reader display |
+| Reader | `progress` | number | `0` | On location change | Progress bar |
+| Reader | `isFullscreen` | boolean | `false` | On fullscreen toggle | Layout changes |
 
-**Development Workflow:**
-- **Vite** serves frontend in development with HMR
-- **Express server** handles API routes and serves built frontend in production
-- **Single package.json** with unified dependency management
-- **TypeScript** provides type safety across frontend and backend
+## Functions & Methods — What They Do and When They Run
 
-### API Endpoints
+### Server-Side Functions (server.ts)
 
-**Authentication:**
-- `POST /api/auth/signup` - User registration
-- `POST /api/auth/login` - User login
-- `GET /api/auth/me` - Get current user info
+| Function | Location | Purpose | Parameters | Returns | When Called | Side Effects |
+|----------|----------|---------|------------|---------|-------------|--------------|
+| `startServer` | `server.ts:172` | Initialize and start Express server | None | Promise<void> | On script execution | Starts HTTP server, connects to DB |
+| `logActivity` | `server.ts:135-145` | Log admin actions to database | type, message, adminUser | Promise<void> | After admin operations | Inserts AdminActivity document |
+| `verifyToken` | `server.ts:149-157` | JWT authentication middleware | req, res, next | void | On protected routes | Sets req.user or returns 401 |
+| `isAdmin` | `server.ts:159-163` | Admin role check middleware | req, res, next | void | On admin routes | Returns 403 if not admin |
+| `extractEpubMetadata` | `server.ts:805-838` | Extract metadata from EPUB files | filePath: string | Promise<object> | During book upload | Reads EPUB file, extracts cover |
 
-**Books:**
-- `GET /api/books` - List all books
-- `GET /api/books/:id` - Get specific book details
+### API Route Handlers
 
-**Reading Progress:**
-- `GET /api/progress/:bookId` - Get user's reading progress
-- `POST /api/progress` - Update reading progress
+| Route | Method | Handler | Purpose | Parameters | Returns | When Called | Side Effects |
+|-------|--------|---------|---------|------------|---------|-------------|--------------|
+| `/api/auth/signup` | POST | `server.ts:218-235` | User registration | username, email, password | {token, user} | On signup form submit | Creates User document, sends JWT |
+| `/api/auth/login` | POST | `server.ts:237-271` | User authentication | email, password | {token, user} | On login form submit | Updates User document, sends JWT |
+| `/api/auth/me` | GET | `server.ts:273-281` | Get current user | None (from token) | user object | On app load | None |
+| `/api/books` | GET | `server.ts:320-365` | List books with filtering | query params (page, search, category, sort) | {books, total, page, total_pages} | On library page load/filter | None |
+| `/api/books/:id` | GET | `server.ts:367-378` | Get book details | id (URL param) | book object | On book detail page | None |
+| `/api/progress/:bookId` | GET | `server.ts:447-455` | Get reading progress | bookId (URL param) | progress object | On book detail/reader load | None |
+| `/api/progress/:bookId` | PUT | `server.ts:459-472` | Update reading progress | bookId, last_location, percentage, chapter | 204 No Content | On reader location change | Updates ReadingProgress document |
+| `/api/admin/books/scrape` | POST | `server.ts:757-785` | Scrape Gutenberg books | query: string | scrape results | On admin scrape action | Creates Book documents |
 
-**Admin (Protected):**
-- `POST /api/admin/books/scrape` - Import books from Gutenberg
-- `DELETE /api/admin/books/:id` - Remove books
-- `PUT /api/admin/books/:id` - Update book details
+### Frontend Functions
 
-**Profile Management:**
-- `GET /api/profile/history` - User's reading history
-- `PUT /api/profile` - Update user profile
-- `PUT /api/profile/password` - Change password
+| Function | Location | Purpose | Parameters | Returns | When Called | Side Effects |
+|----------|----------|---------|------------|---------|-------------|--------------|
+| `cn` | `utils.ts:4-6` | Merge CSS classes | ...inputs: ClassValue[] | string | Throughout components | None |
+| `useInView` | `Landingpage.tsx:89-101` | Intersection observer hook | threshold | {ref, visible} | On component mount | Sets up observers |
+| `useBreakpoint` | `Landingpage.tsx:103-115` | Responsive breakpoint hook | None | breakpoint object | On window resize | Updates state |
+| `saveProgress` | `Reader.tsx:112-140` | Save reading progress to server | cfi, pct, chapter, isRetry | Promise<void> | On location change | Makes API call, updates server |
+| `fetchBooks` | `Library.tsx:47-65` | Fetch books from API | None | Promise<void> | On mount, search/filter change | Updates books state |
+| `handleSubmit` | `Login.tsx:15-25` | Handle login form | e: FormEvent | Promise<void> | On form submit | Calls login API, navigates |
 
-### Environment Variables
+## Data Flow
 
-Create a `.env.local` file with:
-```
-MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/the-shelf?retryWrites=true&w=majority
-JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
+### User Authentication Flow
+1. User submits login/signup form in React frontend
+2. Frontend calls `/api/auth/login` or `/api/auth/signup`
+3. Backend validates credentials, creates/updates User document in MongoDB
+4. Backend generates JWT token, returns to frontend
+5. Frontend stores token in localStorage, updates AuthContext state
+6. AuthContext checks token validity on app load via `/api/auth/me`
 
-# Development
-NODE_ENV=development
-```
+### Book Reading Flow
+1. User clicks book in Library, navigates to `/read/:id`
+2. Reader component fetches book metadata via `/api/books/:id`
+3. Fetches existing progress via `/api/progress/:bookId`
+4. Loads EPUB file via `/api/books/epub-proxy/:id`
+5. epub.js renders book in browser
+6. On location change, calls `saveProgress` → `/api/progress/:bookId` PUT
+7. Progress saved to ReadingProgress collection
 
-**Note:** Replace the `MONGODB_URI` with your actual MongoDB Atlas connection string. You can find this in your Atlas dashboard under "Connect" > "Connect your application".
+### Book Ingestion Flow
+1. Admin uses IngestBooks interface
+2. For Gutenberg: calls `/api/admin/books/scrape` → runs scraper.py
+3. scraper.py searches Gutenberg API, downloads EPUBs/covers
+4. Backend creates Book documents in MongoDB
+5. For manual upload: handles file upload, extracts metadata, creates Book document
 
-### Development Commands
+### State Management
+- **Authentication**: React Context (AuthContext) manages user/token state globally
+- **Component State**: Local useState for UI state (loading, forms, filters)
+- **Server State**: MongoDB collections (User, Book, ReadingProgress, AdminActivity)
 
-- `npm run dev` - Start development server with HMR
-- `npm run build` - Build for production
-- `npm run preview` - Preview production build
-- `npm run lint` - TypeScript type checking
-- `npm run clean` - Remove build artifacts
+## Environment Variables & Config
 
-### Deployment
+| Variable | Purpose | Required | Default | Safe Default |
+|----------|---------|----------|---------|--------------|
+| `MONGODB_URI` | MongoDB connection string | Yes | `mongodb://localhost:27017/the-shelf` | No (contains credentials) |
+| `JWT_SECRET` | JWT signing secret | Yes | `your-secret-key` | No (must be unique/secret) |
+| `SESSION_DURATION` | JWT token expiration | No | `24h` | Yes |
+| `EMAIL_USER` | Gmail address for password reset | Yes (for password reset) | N/A | No (contains credentials) |
+| `EMAIL_PASS` | Gmail app password | Yes (for password reset) | N/A | No (contains credentials) |
+| `NODE_ENV` | Environment mode | No | `development` | Yes |
 
-The application is designed to run on a single server in production:
-1. Build frontend with `npm run build`
-2. Express server serves static files and handles API routes
-3. Connect to MongoDB instance
-4. Set environment variables for production
+## Minor to Major Things I Should Know
 
-This architecture provides a scalable, maintainable foundation for an EPUB reading platform with user management and progress tracking.
+### Hardcoded Values
+- Theme colors defined in `index.css` and Reader component
+- Activity timeout of 24 hours in AuthContext
+- File size limits (500MB for EPUB, 10MB for covers) in multer config
+- Rate limiting (100 requests per 15 minutes) in server.ts
+- Default sort order "newest" in Library component
+- Admin role check uses string "admin" throughout
+
+### TODOs or FIXMEs Found
+- None explicitly marked, but some areas could be improved:
+  - Password reset email template is hardcoded HTML
+  - No input validation on some admin forms
+  - Error handling could be more comprehensive
+
+### Non-Obvious Logic
+- Books with `status: "Archived"` are hidden from user-facing routes but visible to admins
+- Reading progress uses CFI (EPUB Canonical Fragment Identifier) for precise positioning
+- Admin activity logging happens after operations, not before
+- File uploads go to `uploads/` first, then moved to `storage/` after processing
+- Duplicate Gutenberg books are skipped based on `gutenbergId` field
+
+### Edge Cases
+- Users can have multiple reading sessions for same book (only latest progress kept)
+- Failed login attempts lock account for 15 minutes after 5 failures
+- Password reset tokens expire in 30 minutes
+- Book search is case-insensitive regex on title and author
+- Cover images are extracted from EPUB if not provided separately
+
+### Critical Behaviors
+- All admin routes require `role: "admin"` in user document
+- JWT tokens are checked on every protected request
+- File uploads are validated for type and size server-side
+- MongoDB indexes are created automatically on server start
+- Production build serves static files without Vite middleware
+
+### Development Notes
+- `npm run dev` uses tsx for TypeScript execution
+- Vite HMR works for frontend changes
+- Backend changes require server restart
+- MongoDB connection is required for app to start
+- Email functionality requires Gmail app password setup
+
+### Security Considerations
+- Passwords hashed with bcrypt (10 rounds)
+- JWT tokens have configurable expiration
+- File uploads restricted to EPUB and image types
+- Rate limiting prevents abuse
+- Helmet adds security headers
+- CSP headers configured for EPUB reading
+
+### Performance Notes
+- Book list pagination (20 per page)
+- Search debounced (400ms delay)
+- Reading progress auto-saves every few seconds
+- Images lazy-loaded with referrer policy
+- EPUB files streamed directly from disk
+
+### Deployment Requirements
+- Node.js environment
+- MongoDB instance (Atlas or local)
+- File system write permissions for uploads/storage
+- Email service configured for password reset
+- HTTPS recommended for production (JWT over HTTP)
