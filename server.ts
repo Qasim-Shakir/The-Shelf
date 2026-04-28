@@ -495,35 +495,61 @@ app.post("/api/auth/reset-password", async (req, res) => {
 
   app.post("/api/admin/books/scrape", verifyToken, isAdmin, async (req, res) => {
     try {
-      const { query } = req.body;
+      const { query, limit = 10, language = "en" } = req.body;
       const response = await axios.get(
         `https://gutendex.com/books?search=${encodeURIComponent(query)}`
       );
-      const results = response.data.results.slice(0, 10);
+      const results = response.data.results.slice(0, limit);
 
-      let ingestedCount = 0;
+      let added = 0;
+      let skipped_duplicates = 0;
+      let failed = 0;
+      const books_added = [];
+
       for (const item of results) {
         const epubUrl = item.formats["application/epub+zip"];
-        if (!epubUrl) continue;
+        if (!epubUrl) {
+          failed++;
+          continue;
+        }
 
         const existingBook = await Book.findOne({ gutenbergId: item.id });
-        if (!existingBook) {
+        if (existingBook) {
+          skipped_duplicates++;
+          continue;
+        }
+
+        try {
           const book = new Book({
             title: item.title,
             author: item.authors.map((a: any) => a.name).join(", "),
-            category: item.subjects[0] || "Classic Fiction", // ✅ was genre
+            category: item.subjects[0] || "Classic Fiction",
             epubUrl,
             coverUrl: item.formats["image/jpeg"] || "",
-            description: item.summaries?.[0] || "",           // ✅ added
-            language: item.languages?.[0] || "en",            // ✅ added
+            description: item.summaries?.[0] || "",
+            language: item.languages?.[0] || language,
             gutenbergId: item.id,
-            // ✅ Removed publicationYear (was wrongly storing download_count)
           });
-          await book.save();
-          ingestedCount++;
+          const savedBook = await book.save();
+          added++;
+          books_added.push({
+            book_id: savedBook._id.toString(),
+            title: savedBook.title,
+            author: savedBook.author,
+          });
+        } catch (err) {
+          console.error("Error saving book:", err);
+          failed++;
         }
       }
-      res.json({ message: `Scrape complete. ${ingestedCount} books added.` });
+
+      res.json({
+        message: `Scrape completed. ${added} book${added !== 1 ? "s" : ""} added, ${skipped_duplicates} skipped, ${failed} failed.`,
+        added,
+        skipped_duplicates,
+        failed,
+        books_added,
+      });
     } catch (error: any) {
       console.error("Scrape error:", error);
       res.status(500).json({ error: "Failed to scrape Gutenberg." });
