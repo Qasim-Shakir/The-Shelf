@@ -56,45 +56,44 @@ const DARK_THEME = {
 };
 
 export default function Reader() {
-  const { id }         = useParams();
+  const { id } = useParams();
   const [searchParams] = useSearchParams();
-  const navigate       = useNavigate();
-  const { user }       = useAuth();
+  const navigate = useNavigate();
+  const { user } = useAuth();
 
-  const viewerRef      = useRef<HTMLDivElement>(null);
-  const bookRef        = useRef<Book | null>(null);
-  const renditionRef   = useRef<Rendition | null>(null);
-  const flipTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const currentCfiRef  = useRef<string | null>(null);
+  const viewerRef = useRef<HTMLDivElement>(null);
+  const bookRef = useRef<Book | null>(null);
+  const renditionRef = useRef<Rendition | null>(null);
+  const flipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const currentCfiRef = useRef<string | null>(null);
   const initialDisplayDoneRef = useRef(false);
   const maxProgressRef = useRef<{ cfi: string; pct: number; chapter: string } | null>(null);
-  const autoSaveTimer  = useRef<ReturnType<typeof setInterval> | null>(null);
-  const retryTimer     = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoSaveTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [bookMeta,        setBookMeta]        = useState<any>(null);
-  const [isLoading,       setIsLoading]       = useState(true);
-  const [progress,        setProgress]        = useState(0);
-  const [chapter,         setChapter]         = useState("");
-  const [totalPages,      setTotalPages]      = useState(0);
-  const [currentPage,     setCurrentPage]     = useState(0);
-  const [toc,             setToc]             = useState<any[]>([]);
-  const [isSidebarOpen,   setIsSidebarOpen]   = useState(false);
-  const [fontSize,        setFontSize]        = useState(18);
-  const [isFullscreen,    setIsFullscreen]    = useState(false);
-  const [layout,          setLayout]          = useState<"spread" | "single">("spread");
-  const [flipDir,         setFlipDir]         = useState<"" | "right" | "left">("");
-  const [error,           setError]           = useState("");
-  const [isDark,          setIsDark]          = useState(false);
+  const[bookMeta, setBookMeta] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [progress, setProgress] = useState(0);
+  const [chapter, setChapter] = useState("");
+  const [totalPages, setTotalPages] = useState(0);
+  const[currentPage, setCurrentPage] = useState(0);
+  const [toc, setToc] = useState<any[]>([]);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const[fontSize, setFontSize] = useState(18);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [layout, setLayout] = useState<"spread" | "single">("spread");
+  const[flipDir, setFlipDir] = useState<"" | "right" | "left">("");
+  const [error, setError] = useState("");
+  const [isDark, setIsDark] = useState(false);
   
-  const [pageInputValue,  setPageInputValue]  = useState("");
-  const [isEditingPage,   setIsEditingPage]   = useState(false);
-  const pageInputRef      = useRef<HTMLInputElement>(null);
+  const[pageInputValue, setPageInputValue] = useState("");
+  const [isEditingPage, setIsEditingPage] = useState(false);
+  const pageInputRef = useRef<HTMLInputElement>(null);
 
-  const token  = localStorage.getItem("token");
+  const token = localStorage.getItem("token");
   const colors = isDark ? DARK_THEME : LIGHT_THEME;
 
   // ── THE BULLETPROOF SYNC REF ──
-  // This guarantees our event listener always has the absolute latest ID and Token
   const syncRef = useRef({ id, token });
   useEffect(() => {
     syncRef.current = { id, token };
@@ -102,14 +101,14 @@ export default function Reader() {
 
   useEffect(() => {
     if (document.getElementById("shelf-flip-style")) return;
-    const style       = document.createElement("style");
-    style.id          = "shelf-flip-style";
+    const style = document.createElement("style");
+    style.id = "shelf-flip-style";
     style.textContent = PAGE_FLIP_STYLE;
     document.head.appendChild(style);
-  }, []);
+  },[]);
 
   // ── Save progress ─────────────────────────────────────────────────────────
-const saveProgress = useCallback(async (cfi: string, pct: number, currentChapter: string, isRetry = false) => {
+  const saveProgress = useCallback(async (cfi: string, pct: number, currentChapter: string, isRetry = false) => {
     const { id: activeId, token: activeToken } = syncRef.current;
     if (!activeToken || activeToken === "null" || !activeId || !cfi) return;
 
@@ -136,9 +135,8 @@ const saveProgress = useCallback(async (cfi: string, pct: number, currentChapter
         }, 30000);
       }
     }
-  }, []);
+  },[]);
 
-  // Only save if this position is further than what we've saved before
   const saveIfFurther = useCallback((cfi: string, pct: number, chapter: string) => {
     const prev = maxProgressRef.current;
     if (!prev || pct >= prev.pct) {
@@ -149,12 +147,12 @@ const saveProgress = useCallback(async (cfi: string, pct: number, currentChapter
 
   // ── Mount a rendition ────────────────────────────────────────────────────
   const mountRendition = useCallback((
-    book:            Book,
-    container:       HTMLDivElement,
-    spreadMode:      "spread" | "single",
-    resumeCfi:       string | null,
+    book: Book,
+    container: HTMLDivElement,
+    spreadMode: "spread" | "single",
+    resumeCfi: string | null,
     currentFontSize: number,
-    dark:            boolean,
+    dark: boolean,
   ) => {
     if (renditionRef.current) {
       try { renditionRef.current.destroy(); } catch { /* ignore */ }
@@ -162,47 +160,83 @@ const saveProgress = useCallback(async (cfi: string, pct: number, currentChapter
     }
 
     initialDisplayDoneRef.current = false;
-    const c = dark ? DARK_THEME : LIGHT_THEME;
 
     const rendition = book.renderTo(container, {
-      width:                "100%",
-      height:               "100%",
-      flow:                 "paginated",
-      spread:               spreadMode === "spread" ? "always" : "none",
-      minSpreadWidth:       spreadMode === "spread" ? 600 : 9999,
-      manager:              "default",
+      width: "100%",
+      height: "100%",
+      flow: "paginated",
+      spread: spreadMode === "spread" ? "always" : "none",
+      minSpreadWidth: spreadMode === "spread" ? 600 : 9999,
+      manager: "default",
       allowScriptedContent: true,
     });
     renditionRef.current = rendition;
 
-    const injectStyle = (selector: string, rules: Record<string, string>) =>
-      (rendition.themes as any).override(selector, rules);
+    // ── REGISTER PROPER EPUB THEMES WITH !IMPORTANT OVERRIDES ──
+    const commonRules = {
+      "padding": spreadMode === "spread" ? "2rem 2.5rem !important" : "2rem 4rem !important",
+      "font-family": "Georgia, 'Times New Roman', serif !important",
+      "line-height": "1.85 !important",
+      "max-width": "100% !important",
+      "box-sizing": "border-box !important",
+    };
 
-    injectStyle("body", {
-      "color":       c.readerText,
-      "background":  c.readerBg,
-      "font-family": "Georgia, 'Times New Roman', serif",
-      "font-size":   `${currentFontSize}px`,
-      "line-height": "1.85",
-      "padding":     spreadMode === "spread" ? "2rem 2.5rem" : "2rem 4rem",
-      "max-width":   "100%",
-      "box-sizing":  "border-box",
+    // We cast rendition.themes to 'any' to bypass strict epub.js typescript object definitions
+    const themes = rendition.themes as any; 
+
+    themes.register("light", {
+      "body": {
+        ...commonRules,
+        "background-color": `${LIGHT_THEME.readerBg} !important`,
+        "color": `${LIGHT_THEME.readerText} !important`,
+      },
+      "div, p, span, a, li, ul, ol": {
+        "color": `${LIGHT_THEME.readerText} !important`,
+        "background-color": "transparent !important",
+      },
+      "h1, h2, h3, h4, h5, h6": {
+        "color": `${LIGHT_THEME.heading} !important`,
+        "font-family": "Georgia, serif !important",
+        "background-color": "transparent !important",
+      }
     });
-    injectStyle("p", { "margin": "0 0 1.2em 0", "text-align": "justify", "text-indent": "1.5em", "hyphens": "auto" });
-    injectStyle("h1, h2, h3", { "font-family": "Georgia, serif", "text-align": "center", "margin-bottom": "1.5em", "color": dark ? "#C8A96E" : "#2C1810" });
-    injectStyle("img", { "max-width": "100%", "height": "auto", "display": "block", "margin": "1rem auto" });
 
-    rendition.themes.fontSize(`${currentFontSize}px`);
+    themes.register("dark", {
+      "body": {
+        ...commonRules,
+        "background-color": `${DARK_THEME.readerBg} !important`,
+        "color": `${DARK_THEME.readerText} !important`,
+      },
+      "div, p, span, a, li, ul, ol": {
+        "color": `${DARK_THEME.readerText} !important`,
+        "background-color": "transparent !important",
+      },
+      "h1, h2, h3, h4, h5, h6": {
+        "color": `${DARK_THEME.accent} !important`,
+        "font-family": "Georgia, serif !important",
+        "background-color": "transparent !important",
+      }
+    });
+
+    themes.select(dark ? "dark" : "light");
+    themes.fontSize(`${currentFontSize}px`);
 
     rendition.on("relocated", (location: any) => {
       const cfi = location.start.cfi;
       currentCfiRef.current = cfi;
 
-      const pct     = (book.locations.percentageFromCfi(cfi) ?? 0) * 100;
-      const loc     = book.locations.locationFromCfi(cfi);
-      const pageNum = typeof loc === "number" ? loc : 0;
+      // Safely extract length (handles TS quirks in epubjs)
+      const total = typeof book.locations.length === "function" ? book.locations.length() : (book.locations as any).total || 0;
+      const pctReal = book.locations.percentageFromCfi(cfi) || 0;
+      const pct = pctReal * 100;
+      const loc = book.locations.locationFromCfi(cfi);
       
-      // Extract the new chapter directly so we don't rely on stale React state
+      // 🛠️ FIX: loc is sometimes typed as string|number in epub.js. Force it to be a number.
+      const numericLoc = typeof loc === "number" ? loc : parseInt(String(loc) , 10);
+      
+      let pageNum = (!isNaN(numericLoc) && numericLoc > 0) ? numericLoc : Math.max(1, Math.round(pctReal * total));
+      if (total > 0 && pageNum > total) pageNum = total;
+      
       const navItem = book.navigation?.get(cfi);
       const newChapter = navItem?.label || "";
 
@@ -211,10 +245,7 @@ const saveProgress = useCallback(async (cfi: string, pct: number, currentChapter
       setChapter(newChapter);
       setIsLoading(false);
 
-      console.log(`📖 Flipped to page ${pageNum}`);
-
       if (!initialDisplayDoneRef.current) {
-        console.log("🚧 Skipping save for initial load.");
         initialDisplayDoneRef.current = true;
         return; 
       }
@@ -250,16 +281,14 @@ const saveProgress = useCallback(async (cfi: string, pct: number, currentChapter
           headers: { Authorization: `Bearer ${token}` },
         });
 
-        epubBook        = ePub(epubRes.data);
+        epubBook = ePub(epubRes.data);
         bookRef.current = epubBook;
 
         epubBook.loaded.navigation.then((nav: any) => {
-          const toc = nav?.toc ?? nav?.landmarks ?? [];
+          const toc = nav?.toc ?? nav?.landmarks ??[];
           if (toc.length > 0) { setToc(toc); return; }
-          // fallback: build TOC from spine items
-          // fallback: build TOC from spine items
           const spine = (epubBook as any).spine;
-          const items = spine?.items ?? spine?.spineItems ?? [];
+          const items = spine?.items ?? spine?.spineItems ??[];
           const fallback = items
             .filter((item: any) => item.href)
             .map((item: any, i: number) => ({
@@ -270,8 +299,11 @@ const saveProgress = useCallback(async (cfi: string, pct: number, currentChapter
         });
 
         await epubBook.ready;
-        await epubBook.locations.generate(1600);
-        setTotalPages(epubBook.locations.length());
+        // Lowered chunk size from 1600 to 1024 for more accurate screen-to-page tracking
+        await epubBook.locations.generate(1024);
+        
+        const locTotal = typeof epubBook.locations.length === "function" ? epubBook.locations.length() : (epubBook.locations as any).total || 0;
+        setTotalPages(locTotal);
 
         let savedCfi: string | null = null;
         try {
@@ -286,7 +318,6 @@ const saveProgress = useCallback(async (cfi: string, pct: number, currentChapter
 
         mountRendition(epubBook, viewerRef.current!, layout, currentCfiRef.current, fontSize, isDark);
 
-        // Auto-save every 5 seconds
         if (autoSaveTimer.current) clearInterval(autoSaveTimer.current);
         autoSaveTimer.current = setInterval(() => {
           const snap = maxProgressRef.current;
@@ -306,12 +337,11 @@ const saveProgress = useCallback(async (cfi: string, pct: number, currentChapter
       if (flipTimerRef.current) clearTimeout(flipTimerRef.current);
       if (autoSaveTimer.current) clearInterval(autoSaveTimer.current);
       if (retryTimer.current) clearTimeout(retryTimer.current);
-      // Final save on unmount
       const snap = maxProgressRef.current;
       if (snap) saveProgress(snap.cfi, snap.pct, snap.chapter);
       if (epubBook) epubBook.destroy();
     };
-  }, [id, user]);
+  },[id, user]);
 
   // ── Save on tab close / browser close ────────────────────────────────────
   useEffect(() => {
@@ -319,7 +349,6 @@ const saveProgress = useCallback(async (cfi: string, pct: number, currentChapter
       const snap = maxProgressRef.current;
       const { id: activeId, token: activeToken } = syncRef.current;
       if (!snap || !activeId || !activeToken) return;
-      // Use sendBeacon for guaranteed delivery on page close
       navigator.sendBeacon(
         `/api/progress`,
         new Blob([JSON.stringify({
@@ -333,8 +362,7 @@ const saveProgress = useCallback(async (cfi: string, pct: number, currentChapter
     };
     window.addEventListener("beforeunload", handleUnload);
     return () => window.removeEventListener("beforeunload", handleUnload);
-  }, []);
-
+  },[]);
 
   // ── Keyboard navigation ──────────────────────────────────────────────────
   useEffect(() => {
@@ -358,7 +386,7 @@ const saveProgress = useCallback(async (cfi: string, pct: number, currentChapter
 
   // ── Layout switch ────────────────────────────────────────────────────────
   const switchLayout = useCallback((newLayout: "spread" | "single") => {
-    const book      = bookRef.current;
+    const book = bookRef.current;
     const container = viewerRef.current;
     if (!book || !container) return;
 
@@ -368,15 +396,14 @@ const saveProgress = useCallback(async (cfi: string, pct: number, currentChapter
     mountRendition(book, container, newLayout, currentCfiRef.current, fontSize, isDark);
   }, [fontSize, isDark, mountRendition]);
 
+  // ── INSTANT THEME TOGGLE ──────────────────────────────────────────────────
   const toggleDark = useCallback(() => {
-    const book      = bookRef.current;
-    const container = viewerRef.current;
-    const newDark   = !isDark;
+    const newDark = !isDark;
     setIsDark(newDark);
-    if (!book || !container) return;
-    setIsLoading(true);
-    mountRendition(book, container, layout, currentCfiRef.current, fontSize, newDark);
-  }, [isDark, layout, fontSize, mountRendition]);
+    if (renditionRef.current) {
+      renditionRef.current.themes.select(newDark ? "dark" : "light");
+    }
+  }, [isDark]);
 
   // ── Flip animation ───────────────────────────────────────────────────────
   const triggerFlip = useCallback((dir: "right" | "left", action: () => void) => {
@@ -384,9 +411,9 @@ const saveProgress = useCallback(async (cfi: string, pct: number, currentChapter
     setFlipDir(dir);
     if (flipTimerRef.current) clearTimeout(flipTimerRef.current);
     flipTimerRef.current = setTimeout(() => setFlipDir(""), 350);
-  }, []);
+  },[]);
 
-  const handlePrev = () => triggerFlip("left",  () => renditionRef.current?.prev());
+  const handlePrev = () => triggerFlip("left", () => renditionRef.current?.prev());
   const handleNext = () => triggerFlip("right", () => renditionRef.current?.next());
 
   // ── Page jump ────────────────────────────────────────────────────────────
@@ -398,7 +425,7 @@ const saveProgress = useCallback(async (cfi: string, pct: number, currentChapter
 
   const commitPageJump = () => {
     const book = bookRef.current;
-    const n    = parseInt(pageInputValue, 10);
+    const n = parseInt(pageInputValue, 10);
     setIsEditingPage(false);
 
     if (!book || isNaN(n) || n < 1 || n > totalPages) return;
@@ -408,15 +435,17 @@ const saveProgress = useCallback(async (cfi: string, pct: number, currentChapter
   };
 
   const handlePageInputKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter")  commitPageJump();
+    if (e.key === "Enter") commitPageJump();
     if (e.key === "Escape") setIsEditingPage(false);
   };
 
+  // ── INSTANT FONT SIZE CHANGE ──────────────────────────────────────────────
   const changeFontSize = (delta: number) => {
     const newSize = Math.max(12, Math.min(32, fontSize + delta));
     setFontSize(newSize);
-    renditionRef.current?.themes.fontSize(`${newSize}px`);
-    (renditionRef.current?.themes as any)?.override("body", { "font-size": `${newSize}px` });
+    if (renditionRef.current) {
+      renditionRef.current.themes.fontSize(`${newSize}px`);
+    }
   };
 
   const jumpTo = (href: string) => {
@@ -507,9 +536,9 @@ const saveProgress = useCallback(async (cfi: string, pct: number, currentChapter
               onClick={() => layout !== "single" && switchLayout("single")}
               className={`px-3 py-1.5 text-xs font-bold transition-colors border-r`}
               style={{
-                borderColor:      colors.border,
-                background:       layout === "single" ? colors.heading : "transparent",
-                color:            layout === "single" ? colors.cardBg  : colors.body,
+                borderColor: colors.border,
+                background: layout === "single" ? colors.heading : "transparent",
+                color: layout === "single" ? colors.cardBg : colors.body,
               }}
             >
               1 Page
@@ -519,7 +548,7 @@ const saveProgress = useCallback(async (cfi: string, pct: number, currentChapter
               className={`px-3 py-1.5 text-xs font-bold transition-colors flex items-center gap-1`}
               style={{
                 background: layout === "spread" ? colors.heading : "transparent",
-                color:      layout === "spread" ? colors.cardBg  : colors.body,
+                color: layout === "spread" ? colors.cardBg : colors.body,
               }}
             >
               <BookOpen size={13} /> 2 Pages
@@ -586,22 +615,22 @@ const saveProgress = useCallback(async (cfi: string, pct: number, currentChapter
         </div>
         <div className="flex items-center gap-3">
           <div
-  className="w-24 md:w-48 h-1 rounded-full overflow-hidden cursor-pointer"
-  style={{ background: colors.border }}
-  onClick={(e) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const pct = (e.clientX - rect.left) / rect.width;
-    const book = bookRef.current;
-    if (!book) return;
-    const cfi = book.locations.cfiFromPercentage(pct);
-    if (cfi) renditionRef.current?.display(cfi);
-  }}
->
-  <div
-    className="h-full transition-all duration-300"
-    style={{ width: `${progress}%`, background: colors.accent }}
-  />
-</div>
+            className="w-24 md:w-48 h-1 rounded-full overflow-hidden cursor-pointer"
+            style={{ background: colors.border }}
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const pct = (e.clientX - rect.left) / rect.width;
+              const book = bookRef.current;
+              if (!book) return;
+              const cfi = book.locations.cfiFromPercentage(pct);
+              if (cfi) renditionRef.current?.display(cfi);
+            }}
+          >
+            <div
+              className="h-full transition-all duration-300"
+              style={{ width: `${progress}%`, background: colors.accent }}
+            />
+          </div>
           <span style={{ color: colors.body }}>{Math.round(progress)}%</span>
         </div>
       </div>
@@ -713,8 +742,8 @@ const saveProgress = useCallback(async (cfi: string, pct: number, currentChapter
               onBlur={commitPageJump}
               className="w-16 text-center text-sm font-bold rounded-md px-2 py-1 outline-none border"
               style={{
-                background:  colors.cardBg,
-                color:       colors.heading,
+                background: colors.cardBg,
+                color: colors.heading,
                 borderColor: colors.accent,
               }}
               autoFocus

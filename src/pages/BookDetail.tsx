@@ -32,11 +32,14 @@ export default function BookDetail() {
 
   const [book,     setBook]     = useState<Book | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null);
-  const [loading,  setLoading]  = useState(true);
+  const[loading,  setLoading]  = useState(true);
   const token = localStorage.getItem("token");
 
-  // Guard: if id is missing or literally "undefined", bail out immediately
   useEffect(() => {
+    // 👈 ADDED: Instantly scrolls to the top of the page when it loads
+    window.scrollTo(0, 0);
+
+    // Guard: if id is missing or literally "undefined", bail out immediately
     if (!id || id === "undefined") {
       console.error("BookDetail: no valid id in URL params. Redirecting to library.");
       navigate("/library", { replace: true });

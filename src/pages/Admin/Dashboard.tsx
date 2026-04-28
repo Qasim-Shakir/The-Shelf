@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
-import { Book, Users, Activity, Download, RefreshCw, Archive, Plus, Settings } from "lucide-react";
+import { Book, Users, Activity, Download, RefreshCw, Archive, Plus, Settings, Menu, X } from "lucide-react";
 import axios from "axios";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -43,29 +43,70 @@ function timeAgo(iso: string) {
 }
 
 // Admin nav shared across all admin pages
+// Admin nav shared across all admin pages
+// Admin nav shared across all admin pages
 export function AdminNav({ active }: { active: "dashboard" | "ingest" | "manage" }) {
+  const [isOpen, setIsOpen] = useState(false);
+
   const tabs = [
-    { key: "dashboard", label: "Admin Dashboard", to: "/admin"         },
+    { key: "dashboard", label: "Dashboard",       to: "/admin"         },
     { key: "ingest",    label: "Ingest Books",    to: "/admin/ingest"  },
     { key: "manage",    label: "Manage Books",    to: "/admin/manage"  },
   ] as const;
 
+  // Get the name of the currently active tab to display on the mobile button
+  const activeLabel = tabs.find(t => t.key === active)?.label || "Menu";
+
   return (
-    <div className="flex gap-0 border-b border-dust mb-12 overflow-x-auto">
-      {tabs.map((t) => (
-        <Link key={t.key} to={t.to}
-          className={`pb-4 px-6 border-b-2 font-bold text-sm shrink-0 transition-colors ${
-            active === t.key
-              ? "border-dark-walnut text-dark-walnut"
-              : "border-transparent text-dust hover:text-tan-oak"
-          }`}>
-          {t.label}
-        </Link>
-      ))}
+    <div className="mb-8 sm:mb-12">
+      
+      {/* 📱 MOBILE VIEW: Hamburger Menu */}
+      <div className="md:hidden relative">
+        <button
+          onClick={() => setIsOpen(!isOpen)}
+          className="flex items-center justify-between w-full px-5 py-4 bg-parchment border border-dust rounded-xl text-dark-walnut font-bold shadow-sm transition-colors hover:bg-[#EFE9DD]"
+        >
+          <span>{activeLabel}</span>
+          {isOpen ? <X size={20} className="text-tan-oak" /> : <Menu size={20} className="text-tan-oak" />}
+        </button>
+
+        {isOpen && (
+          <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-dust rounded-xl overflow-hidden shadow-lg z-50 flex flex-col">
+            {tabs.map((t) => (
+              <Link
+                key={t.key}
+                to={t.to}
+                onClick={() => setIsOpen(false)} // Close menu when clicked
+                className={`px-5 py-4 border-b border-dust/50 last:border-0 font-bold text-sm transition-colors ${
+                  active === t.key
+                    ? "bg-warm-linen text-dark-walnut"
+                    : "text-dust hover:bg-parchment hover:text-tan-oak"
+                }`}
+              >
+                {t.label}
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 💻 DESKTOP VIEW: Horizontal Tabs */}
+      <div className="hidden md:flex w-full border-b border-dust overflow-x-auto no-scrollbar">
+        {tabs.map((t) => (
+          <Link key={t.key} to={t.to}
+            className={`pb-4 px-6 border-b-2 font-bold text-sm whitespace-nowrap transition-colors ${
+              active === t.key
+                ? "border-dark-walnut text-dark-walnut"
+                : "border-transparent text-dust hover:text-tan-oak"
+            }`}>
+            {t.label}
+          </Link>
+        ))}
+      </div>
+      
     </div>
   );
 }
-
 // ── Component ──────────────────────────────────────────────────────────────────
 export default function AdminDashboard() {
   const { token }                   = useAuth();

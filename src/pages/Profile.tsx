@@ -178,21 +178,37 @@ export default function Profile() {
           </div>
           <div className="space-y-8">
             {history.map((h: any) => (
-              <div key={h.id} className="flex gap-8 p-6 bg-warm-linen border border-dust rounded-xl hover:border-tan-oak transition-all group">
+              <div 
+                key={h.id} 
+                onClick={() => navigate(`/book/${h.book.id}`)} // 👈 Redirect to BookDetail page
+                className="flex gap-8 p-6 bg-warm-linen border border-dust rounded-xl hover:border-tan-oak hover:shadow-md cursor-pointer transition-all group"
+              >
                 <div className="w-24 h-36 bg-parchment rounded-lg overflow-hidden flex-shrink-0 border border-dust shadow-sm">
-                  <img src={h.book.coverUrl} alt={h.book.title} className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" referrerPolicy="no-referrer" />
+                  <img 
+                    src={h.book.coverUrl || "https://via.placeholder.com/150x225?text=No+Cover"} 
+                    alt={h.book.title} 
+                    className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" 
+                    referrerPolicy="no-referrer" 
+                  />
                 </div>
                 <div className="flex-1 flex flex-col justify-center">
                   <div className="flex justify-between items-start mb-4">
                     <div>
-                      <h3 className="font-serif font-bold text-xl text-dark-walnut group-hover:text-library-green transition-colors">{h.book.title}</h3>
+                      <h3 className="font-serif font-bold text-xl text-dark-walnut group-hover:text-library-green transition-colors">
+                        {h.book.title}
+                      </h3>
                       <p className="text-tan-oak font-medium italic">{h.book.author}</p>
                     </div>
                     <div className="text-right">
                       <p className="text-2xl font-serif font-bold text-dark-walnut">{Math.round(h.percentage)}%</p>
+                      
+                      {/* Note: We need to stop propagation here so clicking "Continue" doesn't trigger the parent onClick */}
                       <button
-                        onClick={() => navigate(`/read/${h.book.id}`)}
-                        className="text-[10px] font-bold text-library-green hover:underline uppercase tracking-widest mt-2 block"
+                        onClick={(e) => {
+                          e.stopPropagation(); // 👈 Prevents the parent div click from firing
+                          navigate(`/read/${h.book.id}`);
+                        }}
+                        className="text-[10px] font-bold text-library-green hover:underline uppercase tracking-widest mt-2 block w-full text-right"
                       >
                         {h.percentage >= 99 ? "Read Again" : "Continue"}
                       </button>

@@ -469,7 +469,7 @@ function GutenbergScraper({ token }: { token: string | null }) {
                     <span className="text-xs text-slate-400 w-5">{i + 1}</span>
                     <BookOpen size={14} className="text-slate-400 shrink-0" />
                     <span className="text-sm font-medium text-slate-800 flex-1">{b.title}</span>
-                    <span className="text-[10px] text-slate-400 font-mono">{b.book_id.slice(-8)}</span>
+                    <span className="text-[10px] text-slate-400 font-mono">#{b.book_id}</span>
                     <CheckCircle2 size={14} className="text-green-500 shrink-0" />
                   </li>
                 ))}

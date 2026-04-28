@@ -1,5 +1,5 @@
 // server.ts
-import express from "express";
+import express, { query } from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -69,6 +69,8 @@ const upload = multer({
 const MONGODB_URI     = process.env.MONGODB_URI || "mongodb://localhost:27017/the-shelf";
 const JWT_SECRET      = process.env.JWT_SECRET  || "your-secret-key";
 const SESSION_DURATION = process.env.SESSION_DURATION || "24h";
+const RAPIDAPI_KEY    = process.env.RAPIDAPI_KEY || "";
+const RAPIDAPI_HOST   = process.env.RAPIDAPI_HOST || "";
 
 // =============================================================================
 // MongoDB Models
@@ -377,6 +379,7 @@ async function startServer() {
           language:        b.language,
           publicationYear: (b as any).publicationYear,
           ingestedAt:      b.ingestedAt,
+          gutenbergId:     b.gutenbergId,
         })),
         total,
         page,
@@ -402,6 +405,7 @@ async function startServer() {
         language:        book.language,
         publicationYear: book.publicationYear,
         status:          book.status,
+        gutenbergId:     book.gutenbergId,
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -622,9 +626,9 @@ async function startServer() {
   // only returns Active books.
   app.get("/api/admin/books", verifyToken, isAdmin, async (req, res) => {
     try {
-      const page   = Math.max(1, parseInt(req.query.page  as string) || 1);
-      const limit  = Math.min(100, parseInt(req.query.limit as string) || 100);
-      const skip   = (page - 1) * limit;
+      // const page   = Math.max(1, parseInt(req.query.page  as string) || 1);
+      // const limit  = Math.min(100, parseInt(req.query.limit as string) || 100);
+      // const skip   = (page - 1) * limit;
       const search = req.query.search as string | undefined;
       const status = req.query.status as string | undefined;
 
@@ -637,10 +641,7 @@ async function startServer() {
         ];
       }
 
-      const [books, total] = await Promise.all([
-        Book.find(filter).sort({ ingestedAt: -1 }).skip(skip).limit(limit).lean(),
-        Book.countDocuments(filter),
-      ]);
+      const books = await  Book.find(filter).sort({ ingestedAt: -1 }).lean();
 
       res.json(books.map((b) => ({
         id:              b._id,
@@ -653,6 +654,7 @@ async function startServer() {
         description:     b.description,
         coverUrl:        b.coverUrl,
         language:        b.language,
+        gutenbergId:     b.gutenbergId,
       })));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -746,36 +748,196 @@ async function startServer() {
   });
 
   // ── POST /api/admin/books/scrape ──────────────────────────────────────────
+  // ── POST /api/admin/books/scrape ──────────────────────────────────────────
   app.post("/api/admin/books/scrape", verifyToken, isAdmin, async (req, res) => {
-    try {
-      const { query } = req.body;
-      const response  = await axios.get(`https://gutendex.com/books?search=${encodeURIComponent(query)}`);
-      const results   = response.data.results.slice(0, 10);
+    // FIX 1: Extract `language` from req.body so the frontend dropdown works!
+    const { query, limit = 20, language = "en" } = req.body;
 
-      let count = 0;
-      for (const item of results) {
-        const epubUrl = item.formats["application/epub+zip"];
-        if (!epubUrl) continue;
-        if (await Book.findOne({ gutenbergId: item.id })) continue;
-        await Book.create({
-          title:       item.title,
-          author:      item.authors.map((a: any) => a.name).join(", "),
-          category:    item.subjects[0] || "Classic Fiction",
-          epubUrl,
-          coverUrl:    item.formats["image/jpeg"] || "",
-          description: item.summaries?.[0] || "",
-          language:    item.languages?.[0] || "en",
-          gutenbergId: item.id,
-          status:      "Active",
-        });
-        count++;
+    if (!query) {
+      return res.status(400).json({ error: "query is required" });
+    }
+
+    try {
+      console.log(`🔍 Searching Gutenberg API for: "${query}" in language: "${language}"`);
+      
+      // 1. Search Gutenberg API
+      const searchRes = await axios.get(
+        "https://project-gutenberg-free-books-api1.p.rapidapi.com/books",
+        {
+          params: {
+            q: query,
+            languages: language, // FIX 2: Must be plural 'languages'
+            // page_size is removed because the API doesn't support it and it causes errors
+          },
+          headers: {
+            "x-rapidapi-key": RAPIDAPI_KEY,
+            "x-rapidapi-host": RAPIDAPI_HOST,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      console.log(`📊 API Response:`, JSON.stringify(searchRes.data, null, 2).substring(0, 500));
+
+      // Handle multiple possible response structures
+      let books = searchRes.data.results || searchRes.data.books || searchRes.data || [];
+      
+      // If it's not an array, try to extract the array
+      if (!Array.isArray(books)) {
+        console.log(`⚠️ API returned non-array structure:`, Object.keys(books));
+        books = [];
       }
 
-      await logActivity("scrape", `Batch scrape: ${count} book(s) ingested from Gutenberg (query: "${query}")`, { id: req.user.id, username: req.user.email });
-      res.json({ message: `Scrape complete. ${count} books added.` });
+      // FIX 3: Manually limit the results here since the API doesn't support page_size
+      books = books.slice(0, limit);
+
+      console.log(`📚 Found ${books.length} books from API`);
+
+      const ingested = [];
+      const skipped = [];
+      const failed = [];
+
+      for (const book of books) {
+        try {
+          // 2. Skip if already in DB
+          const exists = await Book.findOne({ gutenbergId: book.id });
+          if (exists) {
+            console.log(`⏭️  Skipping duplicate: ${book.title} (${book.id})`);
+            skipped.push(book.id);
+            continue;
+          }
+
+          // 3. Get EPUB download URL
+          const epubUrl =
+            book.formats?.["application/epub+zip"] ||
+            book.formats?.["application/epub"] ||
+            null;
+
+          if (!epubUrl) {
+            console.log(`❌ No EPUB URL for: ${book.title}`);
+            skipped.push(book.id);
+            continue;
+          }
+
+          // 4. Download EPUB to storage
+          console.log(`📥 Downloading EPUB: ${book.title}`);
+          const epubFilename = `gutenberg_${book.id}.epub`;
+          const epubPath = path.join(EPUB_DIR, epubFilename);
+
+          const epubStream = await axios.get(epubUrl, { responseType: "stream" });
+          const writer = fs.createWriteStream(epubPath);
+          epubStream.data.pipe(writer);
+          await new Promise<void>((resolve, reject) => {
+            writer.on("finish", () => resolve());
+            writer.on("error", reject);
+          });
+
+          // 5. Download cover image if available
+          let coverFilename = null;
+          if (book.cover_image) {
+            try {
+              const coverExt = ".jpg";
+              coverFilename = `gutenberg_${book.id}${coverExt}`;
+              const coverPath = path.join(COVERS_DIR, coverFilename);
+              const coverStream = await axios.get(book.cover_image, {
+                responseType: "stream",
+              });
+              const coverWriter = fs.createWriteStream(coverPath);
+              coverStream.data.pipe(coverWriter);
+              await new Promise<void>((resolve, reject) => {
+                coverWriter.on("finish", () => resolve());
+                coverWriter.on("error", reject);
+              });
+            } catch (err) {
+              console.log(`⚠️  Failed to download cover for ${book.title}:`, String(err).substring(0, 100));
+              coverFilename = null;
+            }
+          }
+
+          // 6. Map API response to your Book schema
+          const newBook = new Book({
+            title: book.title,
+            author: book.authors?.[0]?.name || "Unknown",
+            description: book.subjects?.slice(0, 3).join(", ") || "",
+            category: book.subjects?.[0] || "General",
+            language: book.languages?.[0] || "en",
+            gutenbergId: book.id,
+            epubUrl: `/api/books/epub-upload/${epubFilename}`,
+            coverUrl: coverFilename ? `/api/books/cover-upload/${coverFilename}` : "",
+            status: "Active",
+            publicationYear: book.year || "",
+          });
+
+          await newBook.save();
+          console.log(`✅ Ingested: ${book.title}`);
+          ingested.push({ id: book.id, title: book.title });
+        } catch (bookErr) {
+          console.error(`❌ Error processing book:`, String(bookErr).substring(0, 200));
+          failed.push(book.id);
+        }
+      }
+
+      await logActivity(
+        "scrape",
+        `Scraped "${query}": ${ingested.length} ingested, ${skipped.length} skipped, ${failed.length} failed`,
+        req.user
+      );
+
+      res.json({
+        message: `Scrape complete. ${ingested.length} books added, ${skipped.length} skipped.`,
+        added: ingested.length,
+        skipped_duplicates: skipped.length,
+        failed: failed.length,
+        books_added: ingested.map(b => ({ book_id: b.id, title: b.title })), 
+      });
+    } catch (err) {
+      console.error("❌ Scrape error:", err);
+      res.status(500).json({ 
+        error: "Scrape failed", 
+        detail: String(err).substring(0, 500),
+        keys: err instanceof Object ? Object.keys(err) : []
+      });
+    }
+  });
+  // ── DEBUG: Test Gutenberg API directly ────────────────────────────────────────
+  app.get("/api/admin/test-gutenberg-api", verifyToken, isAdmin, async (req, res) => {
+    const { q = "gutenberg" } = req.query;
+    try {
+      console.log(`\n🔍 Testing Gutenberg API with query: "${q}"`);
+      const response = await axios.get(
+        "https://project-gutenberg-free-books-api1.p.rapidapi.com/books",
+        {
+          params: {
+            q: q,
+            language: "en",
+            page_size: 5,
+          },
+          headers: {
+            "x-rapidapi-key": RAPIDAPI_KEY,
+            "x-rapidapi-host": RAPIDAPI_HOST,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      console.log(`✅ API Response received (status ${response.status})`);
+      console.log(`📊 Response structure:`, Object.keys(response.data));
+      console.log(`📋 Full response:`, JSON.stringify(response.data, null, 2).substring(0, 1000));
+      
+      res.json({
+        status: response.status,
+        keys: Object.keys(response.data),
+        data: response.data,
+        apiKey: RAPIDAPI_KEY ? `Set (${RAPIDAPI_KEY.substring(0, 10)}...)` : "NOT SET",
+        apiHost: RAPIDAPI_HOST || "NOT SET",
+      });
     } catch (err: any) {
-      console.error("Scrape error:", err);
-      res.status(500).json({ error: "Failed to scrape Gutenberg." });
+      console.error(`❌ API Test Error:`, err.message);
+      res.status(500).json({
+        error: err.message,
+        details: err.response?.data || err.toString(),
+        apiKey: RAPIDAPI_KEY ? `Set (${RAPIDAPI_KEY.substring(0, 10)}...)` : "NOT SET",
+        apiHost: RAPIDAPI_HOST || "NOT SET",
+      });
     }
   });
 

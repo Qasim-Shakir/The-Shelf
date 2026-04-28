@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
 /* ─── Open Library free cover CDN ───────────────────────────────── */
 const COVER = (isbn: string) =>
@@ -167,6 +168,7 @@ export default function LandingPage() {
   const navigate = useNavigate();
   const { isMobile, isTablet, isDesktop } = useBreakpoint();
   const [menuOpen, setMenuOpen] = useState(false);
+  const { user,logout } = useAuth();
 
   const heroRef   = useInView(0.05);
   const featRef   = useInView(0.07);
@@ -186,20 +188,37 @@ export default function LandingPage() {
         <span style={{ fontSize: 18, color: "#F5F0E8", letterSpacing: "0.04em" }}>The Shelf</span>
 
         {/* Desktop nav */}
+        {/* Desktop nav */}
         {!isMobile && (
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <NavBtn onClick={() => navigate("/library")}>Browse</NavBtn>
-            <NavBtn onClick={() => navigate("/login")}>Log in</NavBtn>
-            <button onClick={() => navigate("/signup")}
-              style={{ padding: "9px 22px", background: "#4A6B5B", border: "none", borderRadius: 3, fontSize: 13, color: "#FDFAF5", fontFamily: "sans-serif", cursor: "pointer", transition: "background 0.2s", letterSpacing: "0.02em" }}
-              onMouseEnter={e => (e.currentTarget.style.background = "#3d5a4c")}
-              onMouseLeave={e => (e.currentTarget.style.background = "#4A6B5B")}>
-              Sign up — free
-            </button>
+            {user ? (
+              // 🟢 LOGGED IN VIEW
+              <>
+                <NavBtn onClick={() => navigate("/library")}>Go to Library</NavBtn>
+                <button onClick={() => { logout(); navigate("/"); }}
+                  style={{ padding: "9px 22px", background: "#4A6B5B", border: "none", borderRadius: 3, fontSize: 13, color: "#FDFAF5", fontFamily: "sans-serif", cursor: "pointer", transition: "background 0.2s", letterSpacing: "0.02em" }}
+                  onMouseEnter={e => (e.currentTarget.style.background = "#3d5a4c")}
+                  onMouseLeave={e => (e.currentTarget.style.background = "#4A6B5B")}>
+                  Sign out
+                </button>
+              </>
+            ) : (
+              // 🔴 LOGGED OUT VIEW
+              <>
+                <NavBtn onClick={() => navigate("/library")}>Browse</NavBtn>
+                <NavBtn onClick={() => navigate("/login")}>Log in</NavBtn>
+                <button onClick={() => navigate("/signup")}
+                  style={{ padding: "9px 22px", background: "#4A6B5B", border: "none", borderRadius: 3, fontSize: 13, color: "#FDFAF5", fontFamily: "sans-serif", cursor: "pointer", transition: "background 0.2s", letterSpacing: "0.02em" }}
+                  onMouseEnter={e => (e.currentTarget.style.background = "#3d5a4c")}
+                  onMouseLeave={e => (e.currentTarget.style.background = "#4A6B5B")}>
+                  Sign up — free
+                </button>
+              </>
+            )}
           </div>
         )}
 
-        {/* Mobile hamburger */}
+        {/* Mobile hamburger icon */}
         {isMobile && (
           <button onClick={() => setMenuOpen(o => !o)}
             style={{ background: "none", border: "none", cursor: "pointer", padding: 4, display: "flex", flexDirection: "column", gap: 5 }}>
@@ -212,6 +231,54 @@ export default function LandingPage() {
       </nav>
 
       {/* Mobile dropdown menu */}
+      {isMobile && menuOpen && (
+        <div style={{ background: "rgba(42,31,19,0.98)", borderBottom: "0.5px solid rgba(197,185,168,0.12)", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 4, position: "sticky", top: 55, zIndex: 99 }}>
+          {user ? (
+            // 🟢 LOGGED IN VIEW (MOBILE)
+            <>
+              <button onClick={() => { navigate("/library"); setMenuOpen(false); }}
+                style={{ padding: "12px 0", background: "none", border: "none", fontSize: 15, color: "#8a7a68", fontFamily: "sans-serif", cursor: "pointer", textAlign: "left", borderBottom: "0.5px solid rgba(197,185,168,0.08)" }}>
+                Go to Library
+              </button>
+              <button onClick={() => { logout(); setMenuOpen(false); navigate("/"); }}
+                style={{ marginTop: 8, padding: "13px", background: "#4A6B5B", border: "none", borderRadius: 3, fontSize: 14, color: "#FDFAF5", fontFamily: "sans-serif", cursor: "pointer" }}>
+                Sign out
+              </button>
+            </>
+          ) : (
+            // 🔴 LOGGED OUT VIEW (MOBILE)
+            <>
+              {[
+                { label: "Browse", path: "/library" },
+                { label: "Log in", path: "/login" },
+              ].map(({ label, path }) => (
+                <button key={label} onClick={() => { navigate(path); setMenuOpen(false); }}
+                  style={{ padding: "12px 0", background: "none", border: "none", fontSize: 15, color: "#8a7a68", fontFamily: "sans-serif", cursor: "pointer", textAlign: "left", borderBottom: "0.5px solid rgba(197,185,168,0.08)" }}>
+                  {label}
+                </button>
+              ))}
+              <button onClick={() => { navigate("/signup"); setMenuOpen(false); }}
+                style={{ marginTop: 8, padding: "13px", background: "#4A6B5B", border: "none", borderRadius: 3, fontSize: 14, color: "#FDFAF5", fontFamily: "sans-serif", cursor: "pointer" }}>
+                Sign up — free
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+        {/* Mobile hamburger
+        {isMobile && (
+          <button onClick={() => setMenuOpen(o => !o)}
+            style={{ background: "none", border: "none", cursor: "pointer", padding: 4, display: "flex", flexDirection: "column", gap: 5 }}>
+            {[0, 1, 2].map(i => (
+              <span key={i} style={{ display: "block", width: 22, height: "0.5px", background: menuOpen ? "#C8A96E" : "#8a7a68", transition: "background 0.2s", transformOrigin: "center",
+                transform: menuOpen ? (i === 0 ? "rotate(45deg) translate(4px,4px)" : i === 2 ? "rotate(-45deg) translate(4px,-4px)" : "scaleX(0)") : "none" }} />
+            ))}
+          </button>
+        )}
+      </nav> */}
+
+      {/* Mobile dropdown menu
       {isMobile && menuOpen && (
         <div style={{ background: "rgba(42,31,19,0.98)", borderBottom: "0.5px solid rgba(197,185,168,0.12)", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 4, position: "sticky", top: 55, zIndex: 99 }}>
           {[
@@ -228,7 +295,7 @@ export default function LandingPage() {
             Sign up — free
           </button>
         </div>
-      )}
+      )} */}
 
       {/* ── HERO ─────────────────────────────────────────────────── */}
       <section style={{ display: "grid", gridTemplateColumns: isDesktop ? "1fr 1fr" : "1fr", minHeight: isDesktop ? "91vh" : "auto", position: "relative" }}>

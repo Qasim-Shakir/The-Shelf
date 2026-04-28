@@ -147,6 +147,164 @@ In production, the server builds the frontend with `npm run build` and serves th
 | Reader | `progress` | number | `0` | On location change | Progress bar |
 | Reader | `isFullscreen` | boolean | `false` | On fullscreen toggle | Layout changes |
 
+## Admin Dashboard Features
+
+The admin dashboard provides comprehensive library management with the following modules:
+
+### Dashboard Module (`Dashboard.tsx`)
+- **Statistics Display**: Real-time counts of active books, archived books, readers, and reading sessions
+- **Activity Feed**: Chronological log of all admin actions with timestamps and action types:
+  - `added` — Books uploaded or scraped
+  - `updated` — Metadata changes
+  - `deleted` — Books permanently removed
+  - `archived` — Books hidden from users
+  - `restored` — Archived books re-activated
+  - `scrape` — Gutenberg scraping events
+- **CSV Export**: Download activity history for audit or analytics purposes
+- **Responsive Navigation**: Desktop tabs and mobile hamburger menu for admin sections
+
+### Ingest Books Module (`IngestBooks.tsx`)
+Three book ingestion methods with duplicate detection:
+
+#### 1. **Manual Upload**
+- Upload single EPUB with optional cover image
+- Auto-extraction of metadata (title, author, language) from EPUB file
+- Manual override for metadata fields if needed
+- Optional Gutenberg ID linking
+- Metadata form includes: Title, Author, Genre, Language, Description
+
+#### 2. **Batch Upload**
+- Upload multiple EPUB files at once
+- Real-time progress tracking (pending → uploading → done/error)
+- Automatic metadata extraction for each file
+- Continue upload queue even if individual files fail
+
+#### 3. **Project Gutenberg Scraper**
+- Search Gutenberg API by query, author, or title
+- Language filtering (English, French, German, Spanish)
+- Configurable result limits (5, 10, 20, 50 books)
+- Automatic EPUB download and storage
+- Automatic cover image extraction and storage
+- Duplicate detection (skips books already in database by gutenbergId)
+- Detailed results: Added count, Skipped (duplicates), Failed count
+- Book list showing all successfully ingested titles
+
+### Manage Books Module (`ManageBooks.tsx`)
+- Browse all books (Active and Archived)
+- Filter and search by title/author
+- **Edit metadata**: Update title, author, genre, description, publication year
+- **Cover management**: Upload or replace book covers
+- **Archive/Restore**: Hide books from users without deletion
+- **Delete**: Permanently remove books from database
+- Activity logged for all changes
+
+## Book Archive Feature
+
+Books can now have a `status` field (Active or Archived):
+- **Active**: Visible to all users in the main library
+- **Archived**: Hidden from user-facing routes but retained in database for admin management
+- Admin-only routes can see all books regardless of status
+- User route `/api/books` filters to `status: "Active"` only
+
+## API Routes (Updated)
+
+### Admin Routes
+- `GET /api/admin/stats` — Get library statistics
+- `GET /api/admin/activity` — Fetch activity log
+- `GET /api/admin/activity/export` — Download activity as CSV
+- `GET /api/admin/books` — List all books (including archived)
+- `PUT /api/admin/books/:id` — Update book metadata and status
+- `DELETE /api/admin/books/:id` — Permanently delete book
+- `POST /api/admin/books/:id/cover` — Upload book cover image
+- `POST /api/admin/books/upload` — Manual EPUB upload
+- `POST /api/admin/books/scrape` — Gutenberg API scraper
+- `GET /api/admin/test-gutenberg-api` — Debug Gutenberg API connectivity
+
+### User Routes (Updated)
+- `GET /api/books` — List active books only (filters `status: "Active"`)
+- Reading progress routes function as before
+
+## Environment Variables (Updated)
+
+Create a `.env.local` file in the project root with the following variables:
+
+```
+# MongoDB Connection
+MONGODB_URI=mongodb://localhost:27017/the-shelf
+
+# Authentication
+JWT_SECRET=your-super-secret-key-change-in-production
+SESSION_DURATION=24h
+
+# Email (Gmail / Nodemailer for password reset)
+EMAIL_USER=your-gmail@gmail.com
+EMAIL_PASS=your-gmail-app-password
+
+# Gutenberg API (RapidAPI)
+RAPIDAPI_KEY=your-rapidapi-key-here
+RAPIDAPI_HOST=project-gutenberg-free-books-api1.p.rapidapi.com
+
+# Environment
+NODE_ENV=development
+```
+
+### Environment Variable Details
+
+| Variable | Purpose | Required | Default | Notes |
+|----------|---------|----------|---------|-------|
+| `MONGODB_URI` | MongoDB connection string | Yes | `mongodb://localhost:27017/the-shelf` | Update for cloud MongoDB |
+| `JWT_SECRET` | Secret for signing JWT tokens | Yes | `your-secret-key` | **Change in production** |
+| `SESSION_DURATION` | Token expiration time | No | `24h` | Format: `24h`, `7d`, etc. |
+| `EMAIL_USER` | Gmail address for sending password resets | Yes | N/A | Requires App Password (not regular password) |
+| `EMAIL_PASS` | Gmail App Password (not account password) | Yes | N/A | Generate in Gmail Security settings |
+| `RAPIDAPI_KEY` | API key for Project Gutenberg scraper | Yes | N/A | Get from https://rapidapi.com |
+| `RAPIDAPI_HOST` | RapidAPI host for Gutenberg | Yes | N/A | `project-gutenberg-free-books-api1.p.rapidapi.com` |
+| `NODE_ENV` | Environment mode | No | `development` | Set to `production` for deployment |
+
+### Setting Up Gmail for Email Notifications
+
+1. Enable 2-Factor Authentication on your Gmail account
+2. Generate an App Password at https://myaccount.google.com/apppasswords
+3. Use the generated 16-character password as `EMAIL_PASS` (not your actual Gmail password)
+
+### Setting Up RapidAPI for Gutenberg Scraper
+
+1. Sign up at https://rapidapi.com
+2. Search for "Project Gutenberg Free Books API"
+3. Subscribe to the free tier
+4. Get your API key from the dashboard
+5. Use the key in `RAPIDAPI_KEY` and the host in `RAPIDAPI_HOST`
+
+## Database Schema Updates
+
+### Book Model (Updated)
+```typescript
+{
+  title: String (required),
+  author: String (required),
+  category: String (required),
+  epubUrl: String (required),
+  coverUrl: String (default ""),
+  description: String (default ""),
+  language: String (default "en"),
+  publicationYear: String (default ""),
+  status: Enum ["Active", "Archived"] (default "Active"),  // NEW
+  gutenbergId: Number (unique, sparse),
+  ingestedAt: Date (default now)
+}
+```
+
+### AdminActivity Model (New)
+```typescript
+{
+  type: Enum ["added", "updated", "deleted", "archived", "restored", "scrape"],
+  message: String,
+  adminId: ObjectId (ref User),
+  adminName: String (default "Admin"),
+  createdAt: Date (default now)
+}
+```
+
 ## Functions & Methods — What They Do and When They Run
 
 ### Server-Side Functions (server.ts)
