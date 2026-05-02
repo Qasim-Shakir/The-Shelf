@@ -43,12 +43,10 @@ function timeAgo(iso: string) {
 }
 
 // Admin nav shared across all admin pages
-// Admin nav shared across all admin pages
-// Admin nav shared across all admin pages
 export function AdminNav({ active }: { active: "dashboard" | "ingest" | "manage" }) {
   const [isOpen, setIsOpen] = useState(false);
 
-  const tabs = [
+  const tabs =[
     { key: "dashboard", label: "Dashboard",       to: "/admin"         },
     { key: "ingest",    label: "Ingest Books",    to: "/admin/ingest"  },
     { key: "manage",    label: "Manage Books",    to: "/admin/manage"  },
@@ -64,7 +62,7 @@ export function AdminNav({ active }: { active: "dashboard" | "ingest" | "manage"
       <div className="md:hidden relative">
         <button
           onClick={() => setIsOpen(!isOpen)}
-          className="flex items-center justify-between w-full px-5 py-4 bg-parchment border border-dust rounded-xl text-dark-walnut font-bold shadow-sm transition-colors hover:bg-[#EFE9DD]"
+          className="cursor-pointer flex items-center justify-between w-full px-5 py-4 bg-parchment border border-dust rounded-xl text-dark-walnut font-bold shadow-sm transition-colors hover:bg-[#EFE9DD]"
         >
           <span>{activeLabel}</span>
           {isOpen ? <X size={20} className="text-tan-oak" /> : <Menu size={20} className="text-tan-oak" />}
@@ -77,7 +75,7 @@ export function AdminNav({ active }: { active: "dashboard" | "ingest" | "manage"
                 key={t.key}
                 to={t.to}
                 onClick={() => setIsOpen(false)} // Close menu when clicked
-                className={`px-5 py-4 border-b border-dust/50 last:border-0 font-bold text-sm transition-colors ${
+                className={`cursor-pointer px-5 py-4 border-b border-dust/50 last:border-0 font-bold text-sm transition-colors ${
                   active === t.key
                     ? "bg-warm-linen text-dark-walnut"
                     : "text-dust hover:bg-parchment hover:text-tan-oak"
@@ -94,7 +92,7 @@ export function AdminNav({ active }: { active: "dashboard" | "ingest" | "manage"
       <div className="hidden md:flex w-full border-b border-dust overflow-x-auto no-scrollbar">
         {tabs.map((t) => (
           <Link key={t.key} to={t.to}
-            className={`pb-4 px-6 border-b-2 font-bold text-sm whitespace-nowrap transition-colors ${
+            className={`cursor-pointer pb-4 px-6 border-b-2 font-bold text-sm whitespace-nowrap transition-colors ${
               active === t.key
                 ? "border-dark-walnut text-dark-walnut"
                 : "border-transparent text-dust hover:text-tan-oak"
@@ -107,14 +105,13 @@ export function AdminNav({ active }: { active: "dashboard" | "ingest" | "manage"
     </div>
   );
 }
+
 // ── Component ──────────────────────────────────────────────────────────────────
 export default function AdminDashboard() {
   const { token }                   = useAuth();
-  // All keys default to 0 so statCards never receives undefined even before
-  // the API responds or if the server omits a field.
   const [stats,    setStats]        = useState<Stats>({ books: 0, users: 0, sessions: 0, archived: 0 });
   const [activity, setActivity]     = useState<ActivityEntry[]>([]);
-  const [loading,  setLoading]      = useState(true);
+  const[loading,  setLoading]      = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [exporting, setExporting]   = useState(false);
   const [error,    setError]        = useState("");
@@ -130,20 +127,18 @@ export default function AdminDashboard() {
         axios.get("/api/admin/stats",    { headers }),
         axios.get("/api/admin/activity", { headers }),
       ]);
-      // Merge with defaults so partial API responses never leave a field undefined
       setStats({ books: 0, users: 0, sessions: 0, archived: 0, ...statsRes.data });
-      setActivity(activityRes.data ?? []);
+      setActivity(activityRes.data ??[]);
     } catch (err: any) {
       setError(err.response?.data?.error ?? "Failed to load dashboard data.");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [token]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  // Export activity log as CSV
   const handleExport = async () => {
     setExporting(true);
     try {
@@ -158,10 +153,9 @@ export default function AdminDashboard() {
       a.click();
       URL.revokeObjectURL(url);
     } catch {
-      // Fallback: build CSV client-side from fetched data
       const rows = [
         ["Type", "Message", "Admin", "When"],
-        ...activity.map((e) => [e.type, `"${e.message}"`, e.adminName, e.createdAt]),
+        ...activity.map((e) =>[e.type, `"${e.message}"`, e.adminName, e.createdAt]),
       ];
       const csv  = rows.map((r) => r.join(",")).join("\n");
       const blob = new Blob([csv], { type: "text/csv" });
@@ -176,8 +170,7 @@ export default function AdminDashboard() {
     }
   };
 
-  // ?? 0 ensures undefined from a partial API response never reaches .toLocaleString()
-  const statCards = [
+  const statCards =[
     { label: "Active Books",     value: stats.books    ?? 0, icon: Book,     accent: false },
     { label: "Total Users",      value: stats.users    ?? 0, icon: Users,    accent: false },
     { label: "Reading Sessions", value: stats.sessions ?? 0, icon: Activity, accent: false },
@@ -185,22 +178,22 @@ export default function AdminDashboard() {
   ];
 
   return (
-    <div className="max-w-6xl mx-auto px-6 py-12">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
 
-      {/* Header */}
-      <div className="flex justify-between items-start mb-12">
+      {/* Header - Stacked on Mobile, Row on Desktop */}
+      <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-6 mb-8 sm:mb-12">
         <div>
           <p className="text-[10px] font-bold uppercase tracking-widest text-dust mb-2">The Shelf</p>
-          <h1 className="text-4xl font-serif font-bold text-dark-walnut mb-3">Admin Dashboard</h1>
-          <p className="text-tan-oak font-medium italic">Manage the library. Choose an action.</p>
+          <h1 className="text-3xl sm:text-4xl font-serif font-bold text-dark-walnut mb-2 sm:mb-3">Admin Dashboard</h1>
+          <p className="text-sm sm:text-base text-tan-oak font-medium italic">Manage the library. Choose an action.</p>
         </div>
-        <div className="flex items-center gap-3 mt-2">
+        <div className="flex items-center gap-3 w-full md:w-auto mt-2 md:mt-0">
           <Link to="/library"
-            className="text-[10px] font-bold uppercase tracking-widest text-tan-oak border border-dust px-4 py-2.5 rounded-lg hover:bg-parchment transition-colors">
+            className="cursor-pointer flex-1 md:flex-none text-center text-[10px] font-bold uppercase tracking-widest text-tan-oak border border-dust px-4 py-3 md:py-2.5 rounded-lg hover:bg-parchment transition-colors">
             ← Library View
           </Link>
           <Link to="/admin/ingest"
-            className="flex items-center gap-2 bg-library-green text-white text-[10px] font-bold uppercase tracking-widest px-4 py-2.5 rounded-lg hover:bg-[#3D5A4C] transition-all shadow-sm">
+            className="cursor-pointer flex-1 md:flex-none flex items-center justify-center gap-2 bg-library-green text-white text-[10px] font-bold uppercase tracking-widest px-4 py-3 md:py-2.5 rounded-lg hover:bg-[#3D5A4C] transition-all shadow-sm">
             <Plus size={14} /> Ingest Books
           </Link>
         </div>
@@ -210,23 +203,23 @@ export default function AdminDashboard() {
 
       {/* Error */}
       {error && (
-        <div className="bg-red-50 border border-red-100 text-red-700 text-sm font-bold px-5 py-4 rounded-xl mb-8">
+        <div className="bg-red-50 border border-red-100 text-red-700 text-sm font-bold px-4 sm:px-5 py-3 sm:py-4 rounded-xl mb-6 sm:mb-8">
           {error}
         </div>
       )}
 
-      {/* Stat cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-5 mb-14">
+      {/* Stat cards - 2 cols on mobile, 4 on desktop */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-5 mb-10 sm:mb-14">
         {statCards.map(({ label, value, icon: Icon, accent }) => (
           <div key={label}
-            className={`border border-dust p-7 rounded-xl shadow-sm ${accent ? "bg-[#EFE9DD]" : "bg-parchment"}`}>
-            <div className="flex justify-between items-start mb-4">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-dust">{label}</p>
+            className={`border border-dust p-5 sm:p-7 rounded-xl shadow-sm ${accent ? "bg-[#EFE9DD]" : "bg-parchment"}`}>
+            <div className="flex justify-between items-start mb-3 sm:mb-4">
+              <p className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest text-dust">{label}</p>
               <Icon size={18} className={accent ? "text-tan-oak" : "text-dust"} />
             </div>
             {loading
-              ? <div className="h-12 w-16 bg-dust/30 rounded animate-pulse" />
-              : <p className={`text-5xl font-serif font-bold ${accent ? "text-tan-oak" : "text-dark-walnut"}`}>
+              ? <div className="h-10 sm:h-12 w-16 bg-dust/30 rounded animate-pulse" />
+              : <p className={`text-4xl sm:text-5xl font-serif font-bold ${accent ? "text-tan-oak" : "text-dark-walnut"}`}>
                   {(value ?? 0).toLocaleString()}
                 </p>
             }
@@ -234,15 +227,15 @@ export default function AdminDashboard() {
         ))}
       </div>
 
-      {/* Quick actions */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-14">
+      {/* Quick actions - Stacked on Mobile, Row on Desktop */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4 mb-10 sm:mb-14">
         {[
           { icon: Plus,     label: "Ingest New Books",  to: "/admin/ingest", primary: true  },
           { icon: Settings, label: "Manage Books",      to: "/admin/manage", primary: false },
           { icon: Archive,  label: "View Archived",     to: "/admin/manage?filter=archived", primary: false },
         ].map(({ icon: Icon, label, to, primary }) => (
           <Link key={label} to={to}
-            className={`flex items-center gap-3 px-6 py-4 rounded-xl border font-bold text-sm transition-all
+            className={`cursor-pointer flex items-center justify-center md:justify-start gap-3 px-6 py-4 rounded-xl border font-bold text-sm transition-all
               ${primary
                 ? "bg-library-green text-white border-library-green hover:bg-[#3D5A4C] shadow-sm"
                 : "bg-parchment text-tan-oak border-dust hover:border-tan-oak hover:text-dark-walnut"
@@ -255,22 +248,22 @@ export default function AdminDashboard() {
 
       {/* Activity log */}
       <div className="bg-parchment border border-dust rounded-2xl overflow-hidden shadow-sm">
-        <div className="p-6 border-b border-dust flex justify-between items-center">
+        <div className="p-4 sm:p-6 border-b border-dust flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sm:gap-0">
           <h3 className="font-serif font-bold text-xl text-dark-walnut">Recent Admin Activity</h3>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
             <button
               onClick={() => fetchAll(true)}
               disabled={refreshing}
-              className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-tan-oak border border-dust px-4 py-2 rounded-lg hover:bg-warm-linen transition-colors">
+              className="cursor-pointer flex-1 sm:flex-none flex items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-widest text-tan-oak border border-dust px-4 py-2 rounded-lg hover:bg-warm-linen transition-colors">
               <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} />
               Refresh
             </button>
             <button
               onClick={handleExport}
               disabled={exporting || activity.length === 0}
-              className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-tan-oak border border-dust px-4 py-2 rounded-lg hover:bg-warm-linen transition-colors disabled:opacity-40">
+              className="cursor-pointer flex-1 sm:flex-none flex items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-widest text-tan-oak border border-dust px-4 py-2 rounded-lg hover:bg-warm-linen transition-colors disabled:opacity-40">
               <Download size={13} className={exporting ? "animate-bounce" : ""} />
-              Export CSV
+              Export
             </button>
           </div>
         </div>
@@ -278,7 +271,7 @@ export default function AdminDashboard() {
         <div className="divide-y divide-dust">
           {loading ? (
             Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex items-start gap-4 p-6">
+              <div key={i} className="flex items-start gap-3 sm:gap-4 p-4 sm:p-6">
                 <div className="w-2 h-2 rounded-full bg-dust/40 mt-2 shrink-0 animate-pulse" />
                 <div className="flex-1 space-y-2">
                   <div className="h-3 bg-dust/30 rounded animate-pulse w-3/4" />
@@ -287,22 +280,22 @@ export default function AdminDashboard() {
               </div>
             ))
           ) : activity.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-dust gap-3">
+            <div className="flex flex-col items-center justify-center py-12 sm:py-16 text-dust gap-3">
               <Activity size={36} strokeWidth={1} />
-              <p className="font-serif italic">No admin activity recorded yet.</p>
+              <p className="font-serif italic text-sm sm:text-base">No admin activity recorded yet.</p>
             </div>
           ) : (
             activity.slice(0, 20).map((entry) => {
               const cfg = EVENT_COLORS[entry.type] ?? EVENT_COLORS.updated;
               return (
-                <div key={entry.id} className="flex items-start gap-4 px-6 py-5 hover:bg-warm-linen transition-colors">
+                <div key={entry.id} className="flex items-start gap-3 sm:gap-4 px-4 sm:px-6 py-4 sm:py-5 hover:bg-warm-linen transition-colors">
                   <div className={`w-2 h-2 rounded-full mt-2 shrink-0 ${cfg.dot}`} />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-dark-walnut">
+                    <p className="text-sm text-dark-walnut leading-snug">
                       <span className={`font-bold ${cfg.text}`}>{cfg.label}:&nbsp;</span>
                       {entry.message}
                     </p>
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-dust mt-1">
+                    <p className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest text-dust mt-1.5">
                       by {entry.adminName} · {timeAgo(entry.createdAt)}
                     </p>
                   </div>

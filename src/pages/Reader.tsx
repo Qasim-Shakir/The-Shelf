@@ -71,23 +71,29 @@ export default function Reader() {
   const autoSaveTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const[bookMeta, setBookMeta] = useState<any>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [bookMeta, setBookMeta] = useState<any>(null);
+  const[isLoading, setIsLoading] = useState(true);
   const [progress, setProgress] = useState(0);
   const [chapter, setChapter] = useState("");
   const [totalPages, setTotalPages] = useState(0);
-  const[currentPage, setCurrentPage] = useState(0);
+  const [currentPage, setCurrentPage] = useState(0);
   const [toc, setToc] = useState<any[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const[fontSize, setFontSize] = useState(18);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [layout, setLayout] = useState<"spread" | "single">("spread");
   const[flipDir, setFlipDir] = useState<"" | "right" | "left">("");
   const [error, setError] = useState("");
   const [isDark, setIsDark] = useState(false);
   
-  const[pageInputValue, setPageInputValue] = useState("");
-  const [isEditingPage, setIsEditingPage] = useState(false);
+  // ── Mobile Responsive Initial State ──
+  const [layout, setLayout] = useState<"spread" | "single">(
+    window.innerWidth < 768 ? "single" : "spread"
+  );
+  const[fontSize, setFontSize] = useState(
+    window.innerWidth < 640 ? 16 : 18
+  );
+
+  const [pageInputValue, setPageInputValue] = useState("");
+  const[isEditingPage, setIsEditingPage] = useState(false);
   const pageInputRef = useRef<HTMLInputElement>(null);
 
   const token = localStorage.getItem("token");
@@ -97,7 +103,7 @@ export default function Reader() {
   const syncRef = useRef({ id, token });
   useEffect(() => {
     syncRef.current = { id, token };
-  }, [id, token]);
+  },[id, token]);
 
   useEffect(() => {
     if (document.getElementById("shelf-flip-style")) return;
@@ -172,51 +178,43 @@ export default function Reader() {
     });
     renditionRef.current = rendition;
 
-    // ── REGISTER PROPER EPUB THEMES WITH !IMPORTANT OVERRIDES ──
+    // ── MOBILE PADDING LOGIC ──
+    const isMobileView = window.innerWidth < 640;
+    const paddingRule = spreadMode === "spread" 
+      ? "2rem 2.5rem !important" 
+      : (isMobileView ? "1rem 1rem !important" : "2rem 4rem !important");
+
+    // ── REGISTER PROPER EPUB THEMES WITH SCOPED CSS ──
     const commonRules = {
-      "padding": spreadMode === "spread" ? "2rem 2.5rem !important" : "2rem 4rem !important",
+      "padding": paddingRule,
       "font-family": "Georgia, 'Times New Roman', serif !important",
       "line-height": "1.85 !important",
       "max-width": "100% !important",
       "box-sizing": "border-box !important",
     };
 
-    // We cast rendition.themes to 'any' to bypass strict epub.js typescript object definitions
     const themes = rendition.themes as any; 
 
-    themes.register("light", {
-      "body": {
-        ...commonRules,
-        "background-color": `${LIGHT_THEME.readerBg} !important`,
-        "color": `${LIGHT_THEME.readerText} !important`,
-      },
-      "div, p, span, a, li, ul, ol": {
-        "color": `${LIGHT_THEME.readerText} !important`,
-        "background-color": "transparent !important",
-      },
-      "h1, h2, h3, h4, h5, h6": {
-        "color": `${LIGHT_THEME.heading} !important`,
-        "font-family": "Georgia, serif !important",
-        "background-color": "transparent !important",
-      }
-    });
+    const applyTheme = (themeName: string, themeColors: any, headingColor: string) => {
+      themes.register(themeName, {
+        [`body.${themeName}`]: {
+          ...commonRules,
+          "background-color": "transparent !important",
+          "color": `${themeColors.readerText} !important`,
+        },
+        [`body.${themeName} *`]: {
+          "background-color": "transparent !important",
+        },[`body.${themeName} div, body.${themeName} p, body.${themeName} span, body.${themeName} a, body.${themeName} li, body.${themeName} ul, body.${themeName} ol`]: {
+          "color": `${themeColors.readerText} !important`,
+        },[`body.${themeName} h1, body.${themeName} h2, body.${themeName} h3, body.${themeName} h4, body.${themeName} h5, body.${themeName} h6`]: {
+          "color": `${headingColor} !important`,
+          "font-family": "Georgia, serif !important",
+        }
+      });
+    };
 
-    themes.register("dark", {
-      "body": {
-        ...commonRules,
-        "background-color": `${DARK_THEME.readerBg} !important`,
-        "color": `${DARK_THEME.readerText} !important`,
-      },
-      "div, p, span, a, li, ul, ol": {
-        "color": `${DARK_THEME.readerText} !important`,
-        "background-color": "transparent !important",
-      },
-      "h1, h2, h3, h4, h5, h6": {
-        "color": `${DARK_THEME.accent} !important`,
-        "font-family": "Georgia, serif !important",
-        "background-color": "transparent !important",
-      }
-    });
+    applyTheme("light", LIGHT_THEME, LIGHT_THEME.heading);
+    applyTheme("dark", DARK_THEME, DARK_THEME.accent);
 
     themes.select(dark ? "dark" : "light");
     themes.fontSize(`${currentFontSize}px`);
@@ -225,14 +223,12 @@ export default function Reader() {
       const cfi = location.start.cfi;
       currentCfiRef.current = cfi;
 
-      // Safely extract length (handles TS quirks in epubjs)
       const total = typeof book.locations.length === "function" ? book.locations.length() : (book.locations as any).total || 0;
       const pctReal = book.locations.percentageFromCfi(cfi) || 0;
       const pct = pctReal * 100;
       const loc = book.locations.locationFromCfi(cfi);
       
-      // 🛠️ FIX: loc is sometimes typed as string|number in epub.js. Force it to be a number.
-      const numericLoc = typeof loc === "number" ? loc : parseInt(String(loc) , 10);
+      const numericLoc = typeof loc === "number" ? loc : parseInt(String(loc), 10);
       
       let pageNum = (!isNaN(numericLoc) && numericLoc > 0) ? numericLoc : Math.max(1, Math.round(pctReal * total));
       if (total > 0 && pageNum > total) pageNum = total;
@@ -255,7 +251,7 @@ export default function Reader() {
 
     rendition.display(resumeCfi ?? undefined);
     return rendition;
-  }, [saveProgress]);
+  },[saveProgress]);
 
   // ── Initial load ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -299,7 +295,6 @@ export default function Reader() {
         });
 
         await epubBook.ready;
-        // Lowered chunk size from 1600 to 1024 for more accurate screen-to-page tracking
         await epubBook.locations.generate(1024);
         
         const locTotal = typeof epubBook.locations.length === "function" ? epubBook.locations.length() : (epubBook.locations as any).total || 0;
@@ -341,7 +336,26 @@ export default function Reader() {
       if (snap) saveProgress(snap.cfi, snap.pct, snap.chapter);
       if (epubBook) epubBook.destroy();
     };
-  },[id, user]);
+  }, [id, user]);
+
+  // ── Responsive Layout Auto-Switch ─────────────────────────────────────────
+  useEffect(() => {
+    let timeoutId: ReturnType<typeof setTimeout>;
+    const handleResize = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        if (window.innerWidth < 768 && layout === "spread") {
+          switchLayout("single");
+        }
+      }, 150); 
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => {
+      clearTimeout(timeoutId);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [layout]);
 
   // ── Save on tab close / browser close ────────────────────────────────────
   useEffect(() => {
@@ -382,7 +396,7 @@ export default function Reader() {
 
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [isEditingPage]);
+  },[isEditingPage]);
 
   // ── Layout switch ────────────────────────────────────────────────────────
   const switchLayout = useCallback((newLayout: "spread" | "single") => {
@@ -394,14 +408,32 @@ export default function Reader() {
     setIsLoading(true);
 
     mountRendition(book, container, newLayout, currentCfiRef.current, fontSize, isDark);
-  }, [fontSize, isDark, mountRendition]);
+  },[fontSize, isDark, mountRendition]);
 
-  // ── INSTANT THEME TOGGLE ──────────────────────────────────────────────────
+  // ── INSTANT THEME TOGGLE WITH FAILSAFE ────────────────────────────────────
   const toggleDark = useCallback(() => {
     const newDark = !isDark;
     setIsDark(newDark);
+    
     if (renditionRef.current) {
-      renditionRef.current.themes.select(newDark ? "dark" : "light");
+      const themeToApply = newDark ? "dark" : "light";
+      const themeToRemove = newDark ? "light" : "dark";
+      
+      renditionRef.current.themes.select(themeToApply);
+
+      // 🛠️ FIX: epub.js frequently forgets to remove the old theme class from the <iframe> body.
+      // We manually scrub the DOM here to force the color swap to apply!
+      try {
+        const contents = (renditionRef.current as any).getContents();
+        contents.forEach((content: any) => {
+          if (content && content.document && content.document.body) {
+            content.document.body.classList.remove(themeToRemove);
+            content.document.body.classList.add(themeToApply);
+          }
+        });
+      } catch (err) {
+        console.warn("Theme toggle class cleanup failed", err);
+      }
     }
   }, [isDark]);
 
@@ -689,11 +721,12 @@ export default function Reader() {
           )}
 
           <div
-            className={`relative flex-1 mx-auto flex flex-col ${layout === "spread" ? "max-w-5xl" : "max-w-2xl"}`}
+            className={`relative flex-1 mx-auto flex flex-col w-full ${layout === "spread" ? "max-w-5xl" : "max-w-2xl"}`}
             style={{
               boxShadow: layout === "spread"
                 ? "0 0 60px rgba(0,0,0,0.22)"
                 : "0 0 40px rgba(0,0,0,0.18)",
+              background: colors.readerBg
             }}
           >
             {layout === "spread" && (
@@ -703,11 +736,14 @@ export default function Reader() {
               />
             )}
 
-            <div
-              ref={viewerRef}
-              className="flex-1"
-              style={{ minHeight: "500px", background: colors.readerBg }}
-            />
+            <div className="flex-1 w-full flex flex-col px-5 sm:px-12 py-6 md:py-10">
+              <div
+                ref={viewerRef}
+                className="flex-1 w-full"
+                style={{ minHeight: "500px" }}
+              />
+            </div>
+
           </div>
         </div>
       </div>
